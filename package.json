@@ -1,0 +1,13 @@
+{
+  "name": "gateml",
+  "private": true,
+  "workspaces": ["backend", "frontend", "sdk"],
+  "scripts": {
+    "dev:backend": "npm -w backend run dev",
+    "dev:frontend": "npm -w frontend run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

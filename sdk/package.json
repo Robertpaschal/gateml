@@ -1,0 +1,32 @@
+{
+  "name": "gateml",
+  "version": "0.1.0",
+  "description": "Route your LLM calls through GateML — one key, all providers, automatic fallbacks.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "openai": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "openai": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openai": "^4.68.0",
+    "typescript": "^5.5.0"
+  },
+  "keywords": ["llm", "gateway", "openai", "anthropic", "ai", "gateml"],
+  "license": "MIT"
+}

@@ -1,0 +1,146 @@
+import { useEffect, useState, useCallback } from "react";
+import { logsApi, statsApi } from "../lib/api";
+import { useAuth } from "../hooks/useAuth";
+import type { RequestLog, Stats } from "../types";
+
+type Tab = "live" | "cost" | "errors";
+
+export function ObservabilityPage() {
+  const { user } = useAuth();
+  const [tab, setTab] = useState<Tab>("live");
+  const [logs, setLogs] = useState<RequestLog[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!user) return;
+    const [l, s] = await Promise.all([
+      logsApi.list(user.token, 50),
+      statsApi.get(user.token),
+    ]);
+    setLogs(l);
+    setStats(s);
+  }, [user]);
+
+  useEffect(() => {
+    refresh();
+    const iv = setInterval(refresh, 10_000); // poll every 10 s
+    return () => clearInterval(iv);
+  }, [refresh]);
+
+  const errors = logs.filter(l => l.status >= 400);
+
+  return (
+    <div className="fade-in">
+      <div className="grid-4" style={{ marginBottom: 20 }}>
+        {[
+          { label: "Requests (24h)", value: stats?.totalCalls.toLocaleString() ?? "—", color: "green" },
+          { label: "Error Rate",     value: stats ? `${stats.errorRate}%` : "—",         color: "yellow" },
+          { label: "p95 Latency",    value: stats ? `${stats.p95LatencyMs}ms` : "—",     color: "blue" },
+          { label: "Total Cost",     value: stats ? `$${stats.totalCostUsd.toFixed(2)}` : "—", color: "orange" },
+        ].map(s => (
+          <div key={s.label} className={`stat-card ${s.color}`}>
+            <div className="stat-label">{s.label}</div>
+            <div className={`stat-value ${s.color}`}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="tabs">
+        {(["live", "cost", "errors"] as Tab[]).map(t => (
+          <div key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
+            {t === "live" ? "Live Log" : t === "cost" ? "Cost" : `Errors (${errors.length})`}
+          </div>
+        ))}
+      </div>
+
+      {tab === "live" && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Request Log</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--accent)" }}>
+              <span className="status-dot" /> Live · auto-refreshes
+            </div>
+          </div>
+          {logs.length === 0 ? (
+            <div style={{ color: "var(--muted)", fontSize: 12, padding: "16px 0" }}>
+              No requests yet. Send a request through the gateway to see it here.
+            </div>
+          ) : (
+            logs.map(l => (
+              <div key={l.id} className="log-entry">
+                <div className="log-time">{new Date(l.created_at * 1000).toLocaleTimeString()}</div>
+                <div style={{ minWidth: 36 }}>
+                  <span className={`tag tag-${l.status < 400 ? "green" : l.status === 429 ? "yellow" : "red"}`} style={{ fontSize: 9 }}>
+                    {l.status}
+                  </span>
+                </div>
+                <div className="log-body">
+                  <div className="log-path">{l.path}</div>
+                  <div className="log-meta">
+                    {l.model} · {l.latency_ms}ms · {(l.prompt_tokens + l.completion_tokens).toLocaleString()} tokens · ${l.cost_usd.toFixed(4)}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab === "cost" && stats && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Cost Breakdown</div>
+            <div className="card-sub">Last 24 h</div>
+          </div>
+          {stats.byModel.length === 0 ? (
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>No data yet.</div>
+          ) : (
+            <>
+              {stats.byModel.map(m => {
+                const pct = stats.totalCostUsd > 0 ? (m.cost / stats.totalCostUsd) * 100 : 0;
+                return (
+                  <div key={m.model} style={{ marginBottom: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
+                      <span>{m.model}</span>
+                      <span style={{ color: "var(--accent3)" }}>${m.cost.toFixed(4)}</span>
+                    </div>
+                    <div className="progress-bar" style={{ height: 6 }}>
+                      <div className="progress-fill" style={{ width: `${pct}%`, background: "var(--accent3)" }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                      {m.calls.toLocaleString()} calls · {m.tokens.toLocaleString()} tokens · {pct.toFixed(0)}% of spend
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: "var(--muted)" }}>Total (24 h)</span>
+                <span style={{ color: "var(--accent3)", fontWeight: 700 }}>${stats.totalCostUsd.toFixed(4)}</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === "errors" && (
+        <div className="card">
+          <div className="card-header"><div className="card-title">Error Log</div></div>
+          {errors.length === 0 ? (
+            <div style={{ color: "var(--accent)", fontSize: 12 }}>No errors in the last 50 requests.</div>
+          ) : (
+            errors.map(l => (
+              <div key={l.id} className="log-entry">
+                <div className="log-time">{new Date(l.created_at * 1000).toLocaleTimeString()}</div>
+                <span className="tag tag-red" style={{ fontSize: 9, minWidth: 36, justifyContent: "center" }}>{l.status}</span>
+                <div className="log-body">
+                  <div className="log-path">{l.model} — {l.path}</div>
+                  <div className="log-meta">{l.latency_ms}ms · {l.provider}</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

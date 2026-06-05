@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gateml"
+version = "0.1.0"
+description = "GateML Python SDK — route LLM calls through the GateML gateway"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+dependencies = ["openai>=1.0.0"]
+keywords = ["llm", "gateway", "openai", "anthropic", "ai", "gateml"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://gateml.io"
+Documentation = "https://gateml.io/docs"
+Repository = "https://github.com/gateml/gateml-python"

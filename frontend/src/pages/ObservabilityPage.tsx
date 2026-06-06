@@ -1,17 +1,33 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { logsApi, statsApi } from "../lib/api";
-import { useToken } from "../hooks/useToken";
-import type { RequestLog, Stats } from "../types";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { logsApi, statsApi }                from "../lib/api";
+import { useToken }                         from "../hooks/useToken";
+import { subscribeToUserPulse }             from "../../lib/firebase";
+import type { LogRow, Stats }               from "../lib/api";
 
 type Tab = "live" | "cost" | "errors";
 
+// Decode userId from the JWT stored in the cookie / localStorage.
+// We only need the `sub` claim (userId) to subscribe to the Firestore pulse.
+function decodeUserId(token: string): string | null {
+  try {
+    const payload = token.split(".")[1];
+    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    return (decoded.sub as string) || null;
+  } catch {
+    return null;
+  }
+}
+
 export function ObservabilityPage() {
   const token = useToken();
-  const [tab, setTab] = useState<Tab>("live");
-  const [logs, setLogs] = useState<RequestLog[]>([]);
+  const [tab,  setTab]  = useState<Tab>("live");
+  const [logs, setLogs] = useState<LogRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [pulseTs, setPulseTs] = useState(0); // incremented on each Firestore pulse
+  const unsubRef = useRef<(() => void) | null>(null);
 
+  // Fetch logs + stats whenever pulseTs changes (Firestore-driven) or on mount
   const refresh = useCallback(async () => {
     if (!token) return;
     const [l, s] = await Promise.all([logsApi.list(token, 50), statsApi.get(token)]);
@@ -19,11 +35,21 @@ export function ObservabilityPage() {
     setStats(s);
   }, [token]);
 
+  useEffect(() => { refresh(); }, [refresh, pulseTs]);
+
+  // Subscribe to the Firestore pulse document — no polling needed
   useEffect(() => {
-    refresh();
-    const iv = setInterval(refresh, 10_000);
-    return () => clearInterval(iv);
-  }, [refresh]);
+    if (!token) return;
+    const userId = decodeUserId(token);
+    if (!userId) return;
+
+    unsubRef.current = subscribeToUserPulse(userId, () => {
+      // Any write from the gateway triggers this → refresh data
+      setPulseTs(t => t + 1);
+    });
+
+    return () => { unsubRef.current?.(); };
+  }, [token]);
 
   const errors = logs.filter(l => l.status >= 400);
 
@@ -56,14 +82,14 @@ export function ObservabilityPage() {
           <div className="card-header">
             <div className="card-title">Request Log</div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--accent)" }}>
-              <span className="status-dot" /> Live · auto-refreshes
+              <span className="status-dot" /> Real-time via Firestore
             </div>
           </div>
           {logs.length === 0 ? (
             <div style={{ color: "var(--muted)", fontSize: 12, padding: "16px 0" }}>No requests yet.</div>
           ) : logs.map(l => (
             <div key={l.id} className="log-entry">
-              <div className="log-time">{new Date(l.created_at * 1000).toLocaleTimeString()}</div>
+              <div className="log-time">{new Date(l.createdAt).toLocaleTimeString()}</div>
               <div style={{ minWidth: 36 }}>
                 <span className={`tag tag-${l.status < 400 ? "green" : l.status === 429 ? "yellow" : "red"}`} style={{ fontSize: 9 }}>
                   {l.status}
@@ -71,7 +97,10 @@ export function ObservabilityPage() {
               </div>
               <div className="log-body">
                 <div className="log-path">{l.path}</div>
-                <div className="log-meta">{l.model} · {l.latency_ms}ms · {(l.prompt_tokens + l.completion_tokens).toLocaleString()} tokens · ${l.cost_usd.toFixed(4)}</div>
+                <div className="log-meta">
+                  {l.model} · {l.latencyMs}ms · {(l.promptTokens + l.completionTokens).toLocaleString()} tokens · ${l.costUsd.toFixed(4)}
+                  {l.isTestMode && <span style={{ color: "var(--accent2)", marginLeft: 8 }}>test</span>}
+                </div>
               </div>
             </div>
           ))}
@@ -91,8 +120,7 @@ export function ObservabilityPage() {
               return (
                 <div key={m.model} style={{ marginBottom: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
-                    <span>{m.model}</span>
-                    <span style={{ color: "var(--accent3)" }}>${m.cost.toFixed(4)}</span>
+                    <span>{m.model}</span><span style={{ color: "var(--accent3)" }}>${m.cost.toFixed(4)}</span>
                   </div>
                   <div className="progress-bar" style={{ height: 6 }}>
                     <div className="progress-fill" style={{ width: `${pct}%`, background: "var(--accent3)" }} />
@@ -118,11 +146,11 @@ export function ObservabilityPage() {
             <div style={{ color: "var(--accent)", fontSize: 12 }}>No errors in the last 50 requests.</div>
           ) : errors.map(l => (
             <div key={l.id} className="log-entry">
-              <div className="log-time">{new Date(l.created_at * 1000).toLocaleTimeString()}</div>
-              <span className="tag tag-red" style={{ fontSize: 9, minWidth: 36, justifyContent: "center" }}>{l.status}</span>
+              <div className="log-time">{new Date(l.createdAt).toLocaleTimeString()}</div>
+              <span className="tag tag-red" style={{ fontSize: 9 }}>{l.status}</span>
               <div className="log-body">
                 <div className="log-path">{l.model} — {l.path}</div>
-                <div className="log-meta">{l.latency_ms}ms · {l.provider}</div>
+                <div className="log-meta">{l.latencyMs}ms · {l.provider}</div>
               </div>
             </div>
           ))}

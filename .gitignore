@@ -1,10 +1,35 @@
-node_modules/
-dist/
+# ─── Environment / Secrets ────────────────────────────────────────────────────
 .env
+.env.*
+!.env.example          # Allow example files
+!.env.*.example
+
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+
+# ─── Build outputs ────────────────────────────────────────────────────────────
+dist/
+.next/
+out/
+
+# ─── Prisma ───────────────────────────────────────────────────────────────────
 *.db
 *.db-shm
 *.db-wal
-.DS_Store
+
+# ─── TypeScript ───────────────────────────────────────────────────────────────
 *.tsbuildinfo
-frontend/dist/
-sdk/dist/
+
+# ─── Firebase service account ─────────────────────────────────────────────────
+*service-account*.json
+firebase-adminsdk*.json
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/settings.json
+*.swp

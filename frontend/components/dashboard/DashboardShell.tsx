@@ -1,7 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import {
+  subscribeToSystemStatus,
+  requestFcmToken,
+  onForegroundMessage,
+  signOut,
+} from "@/lib/firebase";
 
 function getToken(): string | null {
   if (typeof document === "undefined") return null;
@@ -37,24 +43,72 @@ function NavIcon({ name }: { name: string }) {
   );
 }
 
-export function DashboardShell({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [email, setEmail] = useState("");
-  const [checked, setChecked] = useState(false);
+interface Toast { id: number; title: string; body: string }
 
+export function DashboardShell({ children }: { children: React.ReactNode }) {
+  const router   = useRouter();
+  const pathname = usePathname();
+  const [email,   setEmail]   = useState("");
+  const [userId,  setUserId]  = useState("");
+  const [checked, setChecked] = useState(false);
+  const [sysStatus, setSysStatus] = useState({ operational: true, message: "All systems operational" });
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastId = useRef(0);
+
+  // ── Auth check ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const token = getToken();
     if (!token) { router.replace("/auth"); return; }
     fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then((d: { email?: string }) => { setEmail(d.email ?? ""); setChecked(true); })
-      .catch(() => { router.replace("/auth"); });
+      .then((d: { email?: string; id?: string }) => {
+        setEmail(d.email ?? "");
+        setUserId(d.id ?? "");
+        setChecked(true);
+      })
+      .catch(() => router.replace("/auth"));
   }, [router]);
 
-  const logout = () => {
+  // ── Firestore: live system status ───────────────────────────────────────────
+  useEffect(() => {
+    return subscribeToSystemStatus(status => setSysStatus(status));
+  }, []);
+
+  // ── FCM: register token + handle foreground messages ───────────────────────
+  useEffect(() => {
+    if (!userId) return;
+    const token = getToken();
+    if (!token) return;
+
+    // Request notification permission + register FCM token
+    requestFcmToken().then(fcmToken => {
+      if (!fcmToken) return;
+      fetch("/api/notifications/token", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ fcmToken }),
+      }).catch(() => undefined);
+    });
+
+    // Handle in-app (foreground) notifications
+    const unsub = onForegroundMessage(payload => {
+      if (!payload.notification) return;
+      const id = ++toastId.current;
+      setToasts(prev => [...prev, { id, title: payload.notification!.title ?? "", body: payload.notification!.body ?? "" }]);
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000);
+    });
+
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, [userId]);
+
+  const logout = async () => {
+    const token = getToken();
+    if (token) {
+      fetch("/api/notifications/token", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+    }
     document.cookie = "gateml_token=; path=/; max-age=0";
     localStorage.removeItem("gateml_token");
+    await signOut().catch(() => undefined);
     router.replace("/auth");
   };
 
@@ -89,7 +143,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div><span className="status-dot" />All systems operational</div>
+          {/* Live system status from Firestore */}
+          <div>
+            <span className="status-dot" style={{ background: sysStatus.operational ? "var(--accent)" : "var(--warn)" }} />
+            {sysStatus.message}
+          </div>
           <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 10, color: "var(--muted2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{email}</span>
             <button onClick={logout} title="Sign out"
@@ -111,6 +169,21 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <div className="content">{children}</div>
+      </div>
+
+      {/* In-app toast notifications from FCM */}
+      <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 200, display: "flex", flexDirection: "column", gap: 8 }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{
+            background: "var(--surface2)", border: "1px solid var(--border2)",
+            borderRadius: 8, padding: "14px 18px", maxWidth: 320,
+            boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+            animation: "fadeIn 0.3s ease",
+          }}>
+            <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{t.title}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>{t.body}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

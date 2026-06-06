@@ -1,16 +1,18 @@
-const BASE = "/api";
+/**
+ * Typed fetch wrapper for the GateML NestJS backend.
+ * All requests go to /api (proxied by Next.js to the backend in dev,
+ * or to NEXT_PUBLIC_API_URL directly in production).
+ */
+
+const BASE = process.env.NEXT_PUBLIC_API_URL
+  ? process.env.NEXT_PUBLIC_API_URL
+  : "/api";
 
 class ApiError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
+  constructor(public status: number, message: string) { super(message); }
 }
 
-async function request<T>(
-  path: string,
-  init: RequestInit = {},
-  token?: string
-): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
@@ -19,77 +21,77 @@ async function request<T>(
       ...(init.headers ?? {}),
     },
   });
-
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string };
-    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({})) as { message?: string; error?: string };
+    throw new ApiError(res.status, body.message ?? body.error ?? `HTTP ${res.status}`);
   }
   return res.json() as Promise<T>;
 }
 
-// Auth
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
 export const authApi = {
-  signup: (email: string, password: string) =>
-    request<{ token: string; testKey: string; liveKey: string }>("/auth/signup", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
-  login: (email: string, password: string) =>
-    request<{ token: string }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
   me: (token: string) =>
-    request<{ userId: string; email: string }>("/auth/me", {}, token),
+    request<{ id: string; email: string; name?: string; avatarUrl?: string }>("/auth/me", {}, token),
 };
 
-// API keys
+// ── API Keys ─────────────────────────────────────────────────────────────────
+
+export interface ApiKeyRow {
+  id: string; name: string; keyPrefix: string; type: "TEST" | "LIVE";
+  createdAt: string; lastUsedAt: string | null;
+}
+
 export const keysApi = {
-  list: (token: string) =>
-    request<import("../types/index.js").ApiKey[]>("/keys", {}, token),
-  create: (token: string, name: string, type: "test" | "live") =>
-    request<import("../types/index.js").ApiKey>("/keys", {
-      method: "POST",
-      body: JSON.stringify({ name, type }),
-    }, token),
-  revoke: (token: string, id: string) =>
-    request<{ ok: boolean }>(`/keys/${id}`, { method: "DELETE" }, token),
+  list: (token: string)                              => request<ApiKeyRow[]>("/keys", {}, token),
+  create: (token: string, name: string, type: "TEST"|"LIVE") =>
+    request<ApiKeyRow & { key: string }>("/keys", { method: "POST", body: JSON.stringify({ name, type }) }, token),
+  revoke: (token: string, id: string)               => request<void>(`/keys/${id}`, { method: "DELETE" }, token),
 };
 
-// Provider keys
+// ── Provider Keys ─────────────────────────────────────────────────────────────
+
 export const providerKeysApi = {
   list: (token: string) =>
-    request<import("../types/index.js").ProviderKey[]>("/provider-keys", {}, token),
+    request<Array<{ id: string; provider: string; updatedAt: string }>>("/provider-keys", {}, token),
   upsert: (token: string, provider: string, key: string) =>
-    request<{ ok: boolean }>(`/provider-keys/${provider}`, {
-      method: "PUT",
-      body: JSON.stringify({ key }),
-    }, token),
+    request<void>(`/provider-keys/${provider}`, { method: "PUT", body: JSON.stringify({ key }) }, token),
   remove: (token: string, provider: string) =>
-    request<{ ok: boolean }>(`/provider-keys/${provider}`, { method: "DELETE" }, token),
+    request<void>(`/provider-keys/${provider}`, { method: "DELETE" }, token),
 };
 
-// Routing config
+// ── Routing ───────────────────────────────────────────────────────────────────
+
 export const routingApi = {
   get: (token: string) =>
-    request<import("../types/index.js").RoutingConfig>("/routing", {}, token),
-  update: (token: string, config: import("../types/index.js").RoutingConfig) =>
-    request<{ ok: boolean }>("/routing", {
-      method: "PUT",
-      body: JSON.stringify(config),
-    }, token),
+    request<{ primaryModel: string; fallbackChain: Array<{ model: string; on: number[] }> }>("/routing", {}, token),
+  update: (token: string, body: { primaryModel: string; fallbackChain: Array<{ model: string; on: number[] }> }) =>
+    request<void>("/routing", { method: "PUT", body: JSON.stringify(body) }, token),
 };
 
-// Logs
+// ── Logs ──────────────────────────────────────────────────────────────────────
+
+export interface LogRow {
+  id: string; model: string; provider: string; status: number;
+  latencyMs: number; promptTokens: number; completionTokens: number;
+  costUsd: number; path: string; isTestMode: boolean; createdAt: string;
+}
+
 export const logsApi = {
   list: (token: string, limit = 50, offset = 0) =>
-    request<import("../types/index.js").RequestLog[]>(
-      `/logs?limit=${limit}&offset=${offset}`, {}, token
-    ),
+    request<LogRow[]>(`/logs?limit=${limit}&offset=${offset}`, {}, token),
 };
 
-// Stats
+// ── Stats ─────────────────────────────────────────────────────────────────────
+
+export interface Stats {
+  period: "24h";
+  totalCalls: number;  totalTokens: number;  totalCostUsd: number;
+  errorRate: number;   p95LatencyMs: number;
+  byModel: Array<{ model: string; calls: number; cost: number; tokens: number }>;
+  hourly:  Array<{ hour: number; calls: number }>;
+}
+
 export const statsApi = {
-  get: (token: string) =>
-    request<import("../types/index.js").Stats>("/stats", {}, token),
+  get: (token: string) => request<Stats>("/stats", {}, token),
 };

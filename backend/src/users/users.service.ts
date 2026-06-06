@@ -1,0 +1,88 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { ApiKeysService } from '../api-keys/api-keys.service';
+
+interface UpsertUserDto {
+  firebaseUid: string;
+  email:       string;
+  name?:       string | null;
+  avatarUrl?:  string | null;
+  provider:    string;
+}
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async upsert(dto: UpsertUserDto) {
+    const user = await this.prisma.user.upsert({
+      where:  { firebaseUid: dto.firebaseUid },
+      update: { email: dto.email, name: dto.name, avatarUrl: dto.avatarUrl },
+      create: {
+        firebaseUid: dto.firebaseUid,
+        email:       dto.email,
+        name:        dto.name,
+        avatarUrl:   dto.avatarUrl,
+        provider:    dto.provider,
+      },
+    });
+
+    // Provision default keys for brand-new users
+    const keyCount = await this.prisma.apiKey.count({ where: { userId: user.id } });
+    if (keyCount === 0) {
+      await this.provisionDefaultKeys(user.id);
+    }
+
+    return user;
+  }
+
+  findById(id: string) {
+    return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  findByEmail(email: string) {
+    return this.prisma.user.findUnique({ where: { email } });
+  }
+
+  /** Give new users a test key + live key + default routing config. */
+  private async provisionDefaultKeys(userId: string) {
+    const { randomBytes } = await import('crypto');
+    const makeKey = (type: 'test' | 'live') => `gml-sk-${type}_${randomBytes(24).toString('hex')}`;
+
+    const testKey = makeKey('test');
+    const liveKey = makeKey('live');
+
+    await this.prisma.$transaction([
+      this.prisma.apiKey.create({
+        data: {
+          userId,
+          name:      'Default',
+          key:       testKey,
+          keyPrefix: testKey.slice(0, 20),
+          type:      'TEST',
+        },
+      }),
+      this.prisma.apiKey.create({
+        data: {
+          userId,
+          name:      'Default',
+          key:       liveKey,
+          keyPrefix: liveKey.slice(0, 20),
+          type:      'LIVE',
+        },
+      }),
+      this.prisma.routingConfig.create({
+        data: {
+          userId,
+          primaryModel:  'gpt-4o',
+          fallbackChain: [
+            { model: 'claude-sonnet-4-6', on: [429, 500, 502, 503] },
+            { model: 'gpt-4o-mini',       on: [429, 500, 502, 503] },
+          ],
+        },
+      }),
+    ]);
+
+    return { testKey, liveKey };
+  }
+}

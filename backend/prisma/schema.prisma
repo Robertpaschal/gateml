@@ -1,0 +1,148 @@
+// ─── Prisma Schema — GateML ────────────────────────────────────────────────
+// Provider: PostgreSQL (production) | switch url to sqlite for local if needed
+// Run:  npx prisma migrate dev --name init
+// ───────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id          String   @id @default(cuid())
+  firebaseUid String   @unique  // Firebase UID — stable across provider link/unlink
+  email       String   @unique
+  fcmToken    String?            // Latest FCM device token for push notifications (nullable)
+  name        String?
+  avatarUrl   String?
+  provider    String   // "google" | "github" | "apple" | "email"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  apiKeys       ApiKey[]
+  providerKeys  ProviderKey[]
+  routingConfig RoutingConfig?
+  requestLogs   RequestLog[]
+  prompts       Prompt[]
+}
+
+// ── API Keys ─────────────────────────────────────────────────────────────────
+
+enum KeyType {
+  TEST  // Returns synthetic responses; no real LLM calls
+  LIVE  // Forwards to real providers using stored provider keys
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  key        String    @unique       // gml-sk-test_... or gml-sk-live_...
+  keyPrefix  String                  // First 16 chars — safe to display
+  type       KeyType
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestLogs RequestLog[]
+
+  @@index([userId])
+  @@index([key])
+}
+
+// ── Provider Keys ─────────────────────────────────────────────────────────────
+
+enum LLMProvider {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+}
+
+model ProviderKey {
+  id           String      @id @default(cuid())
+  userId       String
+  provider     LLMProvider
+  keyEncrypted String      // AES-256-GCM encrypted
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+}
+
+// ── Routing Config ────────────────────────────────────────────────────────────
+
+model RoutingConfig {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  primaryModel  String   @default("gpt-4o")
+  // JSON: Array<{ model: string; on: number[] }>
+  fallbackChain Json     @default("[]")
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ── Request Logs ──────────────────────────────────────────────────────────────
+
+model RequestLog {
+  id               String   @id @default(cuid())
+  apiKeyId         String
+  userId           String
+  model            String
+  provider         String   // "openai" | "anthropic" | "google" | "mock"
+  status           Int
+  latencyMs        Int
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  costUsd          Float    @default(0)
+  path             String
+  isTestMode       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([apiKeyId])
+}
+
+// ── Prompts & Versions ────────────────────────────────────────────────────────
+
+model Prompt {
+  id        String          @id @default(cuid())
+  userId    String
+  name      String
+  model     String          @default("gpt-4o")
+  status    String          @default("draft") // draft | staging | production
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions PromptVersion[]
+
+  @@index([userId])
+}
+
+model PromptVersion {
+  id        String   @id @default(cuid())
+  promptId  String
+  version   Int
+  body      String   @db.Text
+  note      String   @default("")
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  prompt Prompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@unique([promptId, version])
+  @@index([promptId])
+}

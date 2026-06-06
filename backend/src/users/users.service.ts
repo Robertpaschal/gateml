@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { ApiKeysService } from '../api-keys/api-keys.service';
+import { PrismaService }        from '../prisma/prisma.service';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 
 interface UpsertUserDto {
   firebaseUid: string;
@@ -12,7 +12,10 @@ interface UpsertUserDto {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma:   PrismaService,
+    private readonly firebase: FirebaseAdminService,
+  ) {}
 
   async upsert(dto: UpsertUserDto) {
     const user = await this.prisma.user.upsert({
@@ -27,7 +30,6 @@ export class UsersService {
       },
     });
 
-    // Provision default keys for brand-new users
     const keyCount = await this.prisma.apiKey.count({ where: { userId: user.id } });
     if (keyCount === 0) {
       await this.provisionDefaultKeys(user.id);
@@ -44,7 +46,7 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { email } });
   }
 
-  /** Give new users a test key + live key + default routing config. */
+  /** Give new users a test key + live key + default routing config in Firestore. */
   private async provisionDefaultKeys(userId: string) {
     const { randomBytes } = await import('crypto');
     const makeKey = (type: 'test' | 'live') => `gml-sk-${type}_${randomBytes(24).toString('hex')}`;
@@ -54,34 +56,21 @@ export class UsersService {
 
     await this.prisma.$transaction([
       this.prisma.apiKey.create({
-        data: {
-          userId,
-          name:      'Default',
-          key:       testKey,
-          keyPrefix: testKey.slice(0, 20),
-          type:      'TEST',
-        },
+        data: { userId, name: 'Default', key: testKey, keyPrefix: testKey.slice(0, 20), type: 'TEST' },
       }),
       this.prisma.apiKey.create({
-        data: {
-          userId,
-          name:      'Default',
-          key:       liveKey,
-          keyPrefix: liveKey.slice(0, 20),
-          type:      'LIVE',
-        },
-      }),
-      this.prisma.routingConfig.create({
-        data: {
-          userId,
-          primaryModel:  'gpt-4o',
-          fallbackChain: [
-            { model: 'claude-sonnet-4-6', on: [429, 500, 502, 503] },
-            { model: 'gpt-4o-mini',       on: [429, 500, 502, 503] },
-          ],
-        },
+        data: { userId, name: 'Default', key: liveKey, keyPrefix: liveKey.slice(0, 20), type: 'LIVE' },
       }),
     ]);
+
+    // Routing config lives in Firestore — no PostgreSQL table needed.
+    await this.firebase.setRoutingConfig(userId, {
+      primaryModel:  'gpt-4o',
+      fallbackChain: [
+        { model: 'claude-sonnet-4-6', on: [429, 500, 502, 503] },
+        { model: 'gpt-4o-mini',       on: [429, 500, 502, 503] },
+      ],
+    });
 
     return { testKey, liveKey };
   }

@@ -159,3 +159,5 @@ export function ObservabilityPage() {
     </div>
   );
 }
+
+export default ObservabilityPage;

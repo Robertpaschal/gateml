@@ -1,10 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService }         from '../prisma/prisma.service';
-import { FirebaseAdminService }  from '../firebase/firebase-admin.service';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 
 export interface AlertThresholds {
-  errorRatePct:  number;   // Alert when error rate > this %
-  dailyBudgetUsd:number;   // Alert when daily spend > this $
+  errorRatePct:   number;
+  dailyBudgetUsd: number;
 }
 
 const DEFAULTS: AlertThresholds = { errorRatePct: 5, dailyBudgetUsd: 50 };
@@ -13,19 +12,16 @@ const DEFAULTS: AlertThresholds = { errorRatePct: 5, dailyBudgetUsd: 50 };
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(
-    private readonly prisma:    PrismaService,
-    private readonly firebase:  FirebaseAdminService,
-  ) {}
+  constructor(private readonly firebase: FirebaseAdminService) {}
 
-  /** Store (or update) the user's FCM token for push notifications. */
+  /** Store the user's FCM token in Firestore (userSettings/{userId}). */
   async registerToken(userId: string, fcmToken: string): Promise<void> {
-    await this.prisma.user.update({ where: { id: userId }, data: { fcmToken } });
+    await this.firebase.setFcmToken(userId, fcmToken);
   }
 
-  /** Remove the user's FCM token (e.g. on logout). */
+  /** Remove the FCM token (e.g. on logout). */
   async unregisterToken(userId: string): Promise<void> {
-    await this.prisma.user.update({ where: { id: userId }, data: { fcmToken: null } });
+    await this.firebase.clearFcmToken(userId);
   }
 
   /**
@@ -38,8 +34,8 @@ export class NotificationsService {
     dailyCostUsd: number,
     thresholds: AlertThresholds = DEFAULTS,
   ): Promise<void> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { fcmToken: true } });
-    if (!user?.fcmToken) return;
+    const token = await this.firebase.getFcmToken(userId);
+    if (!token) return;
 
     const alerts: Array<{ title: string; body: string }> = [];
 
@@ -58,13 +54,12 @@ export class NotificationsService {
     }
 
     for (const alert of alerts) {
-      const sent = await this.firebase.sendFcm(user.fcmToken, {
+      const sent = await this.firebase.sendFcm(token, {
         ...alert,
         link: 'https://gateml.io/dashboard/observe',
         data: { userId, errorRate: String(errorRate), dailyCostUsd: String(dailyCostUsd) },
       });
       if (!sent) {
-        // Token is stale — clear it so we stop trying
         this.logger.log(`Clearing stale FCM token for user ${userId}`);
         await this.unregisterToken(userId);
         break;

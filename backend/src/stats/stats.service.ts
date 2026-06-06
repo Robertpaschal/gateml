@@ -77,11 +77,11 @@ export class StatsService {
   }
 
   private async checkAlerts(userId: string, errorRate: number, dailyCostUsd: number) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { fcmToken: true } });
-    if (!user?.fcmToken) return;
+    const token = await this.firebase.getFcmToken(userId);
+    if (!token) return;
 
     if (errorRate > ALERT_ERROR_RATE_PCT) {
-      await this.firebase.sendFcm(user.fcmToken, {
+      await this.firebase.sendFcm(token, {
         title: '⚠️ High error rate',
         body:  `Your error rate is ${errorRate.toFixed(1)}% today (threshold ${ALERT_ERROR_RATE_PCT}%). Check the Observability tab.`,
         link:  'https://gateml.io/dashboard/observe',
@@ -89,7 +89,7 @@ export class StatsService {
     }
 
     if (dailyCostUsd > ALERT_DAILY_BUDGET) {
-      await this.firebase.sendFcm(user.fcmToken, {
+      await this.firebase.sendFcm(token, {
         title: '💸 Daily budget exceeded',
         body:  `You have spent $${dailyCostUsd.toFixed(2)} today (threshold $${ALERT_DAILY_BUDGET}). Review your usage.`,
         link:  'https://gateml.io/dashboard/observe',

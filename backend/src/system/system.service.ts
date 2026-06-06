@@ -90,4 +90,14 @@ export class SystemService implements OnModuleInit {
   async setStatus(operational: boolean, message: string, affectedServices: string[] = []) {
     await this.firebase.setSystemStatus({ operational, message, affectedServices });
   }
+
+  /**
+   * Add or update a single changelog entry in Firestore.
+   * Lets you publish release notes without redeploying the backend.
+   * The `id` (e.g. "v0.4.0") is the Firestore document key.
+   */
+  async upsertEntry(id: string, entry: ChangelogEntry) {
+    await this.firebase.upsertChangelogEntry(id, entry);
+    this.logger.log(`Changelog entry ${id} upserted.`);
+  }
 }

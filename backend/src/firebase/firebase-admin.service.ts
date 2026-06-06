@@ -74,6 +74,67 @@ export class FirebaseAdminService implements OnModuleInit {
     }
   }
 
+  // ── Routing Config ─────────────────────────────────────────────────────────
+  // Stored in routingConfig/{userId} to eliminate a PostgreSQL hit per gateway call.
+
+  async getRoutingConfig(userId: string): Promise<RoutingConfigDoc | null> {
+    if (!this.ready) return null;
+    try {
+      const snap = await this.firestore().collection('routingConfig').doc(userId).get();
+      return snap.exists ? (snap.data() as RoutingConfigDoc) : null;
+    } catch (err) {
+      this.logger.warn(`Failed to read routing config: ${String(err)}`);
+      return null;
+    }
+  }
+
+  async setRoutingConfig(userId: string, config: RoutingConfigDoc): Promise<void> {
+    if (!this.ready) return;
+    try {
+      await this.firestore().collection('routingConfig').doc(userId).set(config);
+    } catch (err) {
+      this.logger.warn(`Failed to write routing config: ${String(err)}`);
+    }
+  }
+
+  // ── User Settings (FCM token) ──────────────────────────────────────────────
+  // Stored in userSettings/{userId} — only accessed server-side via Admin SDK.
+
+  async getFcmToken(userId: string): Promise<string | null> {
+    if (!this.ready) return null;
+    try {
+      const snap = await this.firestore().collection('userSettings').doc(userId).get();
+      return snap.exists ? ((snap.data()?.fcmToken as string | undefined) ?? null) : null;
+    } catch (err) {
+      this.logger.warn(`Failed to read FCM token: ${String(err)}`);
+      return null;
+    }
+  }
+
+  async setFcmToken(userId: string, token: string): Promise<void> {
+    if (!this.ready) return;
+    try {
+      await this.firestore()
+        .collection('userSettings')
+        .doc(userId)
+        .set({ fcmToken: token }, { merge: true });
+    } catch (err) {
+      this.logger.warn(`Failed to set FCM token: ${String(err)}`);
+    }
+  }
+
+  async clearFcmToken(userId: string): Promise<void> {
+    if (!this.ready) return;
+    try {
+      await this.firestore()
+        .collection('userSettings')
+        .doc(userId)
+        .set({ fcmToken: null }, { merge: true });
+    } catch (err) {
+      this.logger.warn(`Failed to clear FCM token: ${String(err)}`);
+    }
+  }
+
   /** Write a system-wide status document the dashboard sidebar subscribes to. */
   async setSystemStatus(status: SystemStatus): Promise<void> {
     if (!this.ready) return;
@@ -171,4 +232,9 @@ export interface FcmPayload {
   body:  string;
   link?: string;
   data?: Record<string, string>;
+}
+
+export interface RoutingConfigDoc {
+  primaryModel:  string;
+  fallbackChain: Array<{ model: string; on: number[] }>;
 }

@@ -152,3 +152,5 @@ export function PromptsPage() {
     </div>
   );
 }
+
+export default PromptsPage;

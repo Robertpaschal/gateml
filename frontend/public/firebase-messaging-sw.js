@@ -1,36 +1,44 @@
 // Firebase Cloud Messaging Service Worker
-// This file must be at the root of the public/ directory.
-// It handles background push notifications when the dashboard tab is not active.
+// Config is fetched from /api/firebase-config at install time because
+// service workers run outside the Next.js bundler and cannot access process.env.
 
 importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js');
 
-// These values are replaced at build time by next.config.ts if using env vars,
-// or set directly here for simplicity (they are public, non-secret values).
-firebase.initializeApp({
-  apiKey:    self.__FIREBASE_API_KEY__     || process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain:self.__FIREBASE_AUTH_DOMAIN__ || process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: self.__FIREBASE_PROJECT_ID__  || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  appId:     self.__FIREBASE_APP_ID__      || process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-});
+// Fetch config immediately (top-level, so it's ready before push events fire).
+const configPromise = fetch('/api/firebase-config')
+  .then(r => r.json())
+  .then(config => {
+    if (!firebase.apps.length) firebase.initializeApp(config);
+    return firebase.messaging();
+  })
+  .catch(err => {
+    console.error('[FCM SW] Failed to load Firebase config:', err);
+    return null;
+  });
 
-const messaging = firebase.messaging();
+// Block install until config + messaging are ready.
+self.addEventListener('install', event => event.waitUntil(configPromise));
 
-// Handle background messages — shows a native OS notification
-messaging.onBackgroundMessage(payload => {
-  const title = payload.notification?.title || 'GateML Alert';
-  const body  = payload.notification?.body  || '';
-  const icon  = '/icon-192.png';
-  const link  = payload.fcmOptions?.link    || 'https://gateml.io/dashboard';
+// Register background message handler after messaging is ready.
+configPromise.then(messaging => {
+  if (!messaging) return;
 
-  self.registration.showNotification(title, {
-    body,
-    icon,
-    data: { link },
+  messaging.onBackgroundMessage(payload => {
+    const title = payload.notification?.title || 'GateML Alert';
+    const body  = payload.notification?.body  || '';
+    const link  = payload.fcmOptions?.link    || 'https://gateml.io/dashboard';
+
+    self.registration.showNotification(title, {
+      body,
+      icon:  '/icon-192.png',
+      badge: '/badge-72.png',
+      data:  { link },
+    });
   });
 });
 
-// When user clicks the notification, open the dashboard
+// Open dashboard when the user clicks a notification.
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const link = event.notification.data?.link || 'https://gateml.io/dashboard';

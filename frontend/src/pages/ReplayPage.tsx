@@ -99,3 +99,5 @@ export function ReplayPage() {
     </div>
   );
 }
+
+export default ReplayPage;

@@ -47,10 +47,11 @@ function init() {
     app = getApps().length
       ? getApps()[0]!
       : initializeApp({
-          apiKey:    process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-          authDomain:process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-          projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-          appId:     process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+          apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+          authDomain:        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+          projectId:         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+          messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+          appId:             process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
         });
     auth = getAuth(app);
     db   = getFirestore(app);
@@ -112,10 +113,16 @@ export function subscribeToUserPulse(
   userId: string,
   onPulse: (pulse: UserPulse) => void,
 ): Unsubscribe {
-  const { db } = init();
-  return onSnapshot(doc(db, 'userPulse', userId), snap => {
-    if (snap.exists()) onPulse(snap.data() as UserPulse);
-  });
+  try {
+    const { db } = init();
+    return onSnapshot(
+      doc(db, 'userPulse', userId),
+      snap => { if (snap.exists()) onPulse(snap.data() as UserPulse); },
+      () => undefined,  // silently ignore connection errors (e.g. no Firebase creds)
+    );
+  } catch {
+    return () => undefined;
+  }
 }
 
 // ── Firestore: System Status ──────────────────────────────────────────────────
@@ -132,10 +139,16 @@ export interface SystemStatus {
 export function subscribeToSystemStatus(
   onStatus: (status: SystemStatus) => void,
 ): Unsubscribe {
-  const { db } = init();
-  return onSnapshot(doc(db, 'meta', 'systemStatus'), snap => {
-    if (snap.exists()) onStatus(snap.data() as SystemStatus);
-  });
+  try {
+    const { db } = init();
+    return onSnapshot(
+      doc(db, 'meta', 'systemStatus'),
+      snap => { if (snap.exists()) onStatus(snap.data() as SystemStatus); },
+      () => undefined,
+    );
+  } catch {
+    return () => undefined;
+  }
 }
 
 // ── Firestore: Changelog ──────────────────────────────────────────────────────
@@ -156,12 +169,20 @@ export interface ChangelogEntry {
 export function subscribeToChangelog(
   onEntries: (entries: ChangelogEntry[]) => void,
 ): Unsubscribe {
-  const { db } = init();
-  const q = query(collection(db, 'changelog'), orderBy('order', 'asc'));
-  return onSnapshot(q, snap => {
-    const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChangelogEntry));
-    onEntries(entries);
-  });
+  try {
+    const { db } = init();
+    const q = query(collection(db, 'changelog'), orderBy('order', 'asc'));
+    return onSnapshot(
+      q,
+      snap => {
+        const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChangelogEntry));
+        onEntries(entries);
+      },
+      () => undefined,
+    );
+  } catch {
+    return () => undefined;
+  }
 }
 
 // ── FCM: Push Notifications ───────────────────────────────────────────────────

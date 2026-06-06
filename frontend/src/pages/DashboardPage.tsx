@@ -114,3 +114,5 @@ function fmt(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return n.toString();
 }
+
+export default DashboardPage;

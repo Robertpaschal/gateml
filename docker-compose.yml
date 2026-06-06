@@ -2,10 +2,10 @@ version: "3.9"
 
 # ─── GateML — Local Development Stack ────────────────────────────────────────
 # Usage:
-#   docker compose up        # start all services
-#   docker compose up -d     # start in background
-#   docker compose logs -f   # stream logs
-#   docker compose down -v   # stop and remove volumes
+#   docker compose up --build   # rebuild images and start
+#   docker compose up -d        # start in background
+#   docker compose logs -f      # stream logs
+#   docker compose down -v      # stop and remove volumes
 
 services:
 
@@ -32,12 +32,12 @@ services:
     build:
       context:    ./backend
       dockerfile: Dockerfile
-      target:     builder          # Use builder stage for dev (hot reload)
-    command: npm run dev
+      target:     builder          # Use builder stage for dev (has devDeps for nest CLI)
+    command: sh -c "npx prisma migrate deploy && npm run dev"
     restart: unless-stopped
     env_file: ./backend/.env
     environment:
-      DATABASE_URL: postgresql://gateml:gateml@db:5432/gateml
+      DATABASE_URL: postgresql://gateml:gateml@db:5432/gateml   # Overrides .env — uses Docker service name
       NODE_ENV:     development
     volumes:
       - ./backend/src:/app/src:ro  # Mount source for hot reload
@@ -57,13 +57,18 @@ services:
     restart: unless-stopped
     env_file: ./frontend/.env.local
     environment:
+      # Browser-side API calls: browser is on the host, so localhost:3001 works
       NEXT_PUBLIC_API_URL: http://localhost:3001
+      # Server-side rewrites (next.config.ts): must use Docker service name
+      INTERNAL_API_URL:    http://backend:3001
     volumes:
       - ./frontend/app:/app/app:ro
       - ./frontend/components:/app/components:ro
+      - ./frontend/lib:/app/lib:ro
+      - ./frontend/public:/app/public:ro
       - ./frontend/src:/app/src:ro
     ports:
-      - "3000:3000"   # Next.js on 3000 inside Docker; keep 5173 for local non-Docker
+      - "3000:5173"   # Next.js dev runs on 5173 inside the container; expose as 3000 on host
     depends_on:
       - backend
 

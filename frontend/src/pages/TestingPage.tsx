@@ -75,3 +75,5 @@ export function TestingPage() {
     </div>
   );
 }
+
+export default TestingPage;

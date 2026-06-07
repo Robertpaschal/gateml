@@ -9,11 +9,12 @@ import { ApiKeysModule }     from '../api-keys/api-keys.module';
 import { ProviderKeysModule }from '../provider-keys/provider-keys.module';
 import { RoutingModule }     from '../routing/routing.module';
 import { LogsModule }        from '../logs/logs.module';
+import { BillingModule }     from '../billing/billing.module';
 
 // FirebaseAdminModule is @Global() — no import needed
 
 @Module({
-  imports: [ApiKeysModule, ProviderKeysModule, RoutingModule, LogsModule],
+  imports: [ApiKeysModule, ProviderKeysModule, RoutingModule, LogsModule, BillingModule],
   controllers: [GatewayController],
   providers:   [GatewayService, OpenAIProxy, AnthropicProxy, FallbackService, MockService],
 })

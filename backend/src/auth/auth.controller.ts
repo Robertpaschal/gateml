@@ -1,10 +1,11 @@
 import { Controller, Post, Body, Get, UseGuards, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsString, IsNotEmpty } from 'class-validator';
-import { AuthService }  from './auth.service';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { CurrentUser }  from './decorators/current-user.decorator';
-import { User }         from '@prisma/client';
+import { AuthService }    from './auth.service';
+import { BillingService } from '../billing/billing.service';
+import { JwtAuthGuard }   from './guards/jwt-auth.guard';
+import { CurrentUser }    from './decorators/current-user.decorator';
+import { User }           from '@prisma/client';
 
 class FirebaseAuthDto {
   @IsString() @IsNotEmpty()
@@ -14,7 +15,10 @@ class FirebaseAuthDto {
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly billing:     BillingService,
+  ) {}
 
   /**
    * Exchange a Firebase ID token (from the frontend) for a GateML JWT.
@@ -28,19 +32,24 @@ export class AuthController {
     return this.authService.signInWithFirebase(body.idToken);
   }
 
-  /** Verify the current JWT and return the logged-in user's profile. */
+  /** Verify the current JWT and return the logged-in user's profile + plan. */
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('jwt')
   @ApiOperation({ summary: 'Get current user' })
-  me(@CurrentUser() user: User) {
+  async me(@CurrentUser() user: User) {
+    const { usage } = await this.billing.getMe(user.id);
+    const lim       = this.billing.limits(user.plan);
     return {
-      id:        user.id,
-      email:     user.email,
-      name:      user.name,
-      avatarUrl: user.avatarUrl,
-      provider:  user.provider,
-      createdAt: user.createdAt,
+      id:         user.id,
+      email:      user.email,
+      name:       user.name,
+      avatarUrl:  user.avatarUrl,
+      provider:   user.provider,
+      createdAt:  user.createdAt,
+      plan:       user.plan,
+      payAsYouGo: user.payAsYouGo,
+      usage:      { requests: usage.requests, limit: lim.liveRequestsPerMonth },
     };
   }
 }

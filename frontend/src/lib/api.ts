@@ -32,7 +32,50 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
 
 export const authApi = {
   me: (token: string) =>
-    request<{ id: string; email: string; name?: string; avatarUrl?: string }>("/auth/me", {}, token),
+    request<{
+      id: string; email: string; name?: string; avatarUrl?: string;
+      plan: "FREE" | "PRO" | "ENTERPRISE";
+      payAsYouGo: boolean;
+      usage: { requests: number; limit: number };
+    }>("/auth/me", {}, token),
+};
+
+// ── Billing ───────────────────────────────────────────────────────────────────
+
+export interface BillingLimits {
+  liveRequestsPerMonth: number;
+  maxApiKeyPairs: number;
+  logRetentionDays: number;
+  maxLogsPerQuery: number;
+  maxPrompts: number;
+  promptVersioning: boolean;
+  fallbackChain: boolean;
+  evalTesting: boolean;
+  paygRateUsd: number;
+}
+
+export interface BillingMe {
+  plan: "FREE" | "PRO" | "ENTERPRISE";
+  payAsYouGo: boolean;
+  limits: BillingLimits;
+  usage: { requests: number; month: string };
+  nextResetAt: string;
+  subscription: {
+    status: string;
+    currentPeriodEnd: string;
+    cancelAtPeriodEnd: boolean;
+  } | null;
+}
+
+export const billingApi = {
+  me: (token: string) =>
+    request<BillingMe>("/billing/me", {}, token),
+  checkout: (token: string, priceId: string) =>
+    request<{ url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ priceId }) }, token),
+  portal: (token: string) =>
+    request<{ url: string }>("/billing/portal", { method: "POST" }, token),
+  togglePayg: (token: string, enabled: boolean) =>
+    request<{ payAsYouGo: boolean }>("/billing/payg", { method: "POST", body: JSON.stringify({ enabled }) }, token),
 };
 
 // ── API Keys ─────────────────────────────────────────────────────────────────

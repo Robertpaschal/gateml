@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -8,6 +8,8 @@ import {
   onForegroundMessage,
   signOut,
 } from "@/lib/firebase";
+import { billingApi } from "@/src/lib/api";
+import type { BillingMe } from "@/src/lib/api";
 
 function getToken(): string | null {
   if (typeof document === "undefined") return null;
@@ -16,21 +18,23 @@ function getToken(): string | null {
 }
 
 const NAV = [
-  { href: "/dashboard",         label: "Dashboard",     icon: "dashboard" },
-  { href: "/dashboard/gateway", label: "Gateway",       icon: "gateway" },
-  { href: "/dashboard/observe", label: "Observability", icon: "observe" },
-  { href: "/dashboard/prompts", label: "Prompts",       icon: "prompt" },
-  { href: "/dashboard/testing", label: "Eval Testing",  icon: "test" },
-  { href: "/dashboard/replay",  label: "Replay",        icon: "replay" },
+  { href: "/dashboard",          label: "Dashboard",     icon: "dashboard" },
+  { href: "/dashboard/gateway",  label: "Gateway",       icon: "gateway" },
+  { href: "/dashboard/observe",  label: "Observability", icon: "observe" },
+  { href: "/dashboard/prompts",  label: "Prompts",       icon: "prompt" },
+  { href: "/dashboard/testing",  label: "Eval Testing",  icon: "test" },
+  { href: "/dashboard/replay",   label: "Replay",        icon: "replay" },
+  { href: "/dashboard/billing",  label: "Billing",       icon: "billing" },
 ];
 
-const ICONS: Record<string, JSX.Element> = {
+const ICONS: Record<string, React.ReactNode> = {
   dashboard: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></>,
   gateway:   <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></>,
   observe:   <><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></>,
   prompt:    <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>,
   test:      <><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></>,
   replay:    <><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></>,
+  billing:   <><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></>,
   logout:    <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>,
 };
 
@@ -45,12 +49,45 @@ function NavIcon({ name }: { name: string }) {
 
 interface Toast { id: number; title: string; body: string }
 
+function UsageMeter({ billing }: { billing: BillingMe }) {
+  const { requests } = billing.usage;
+  const limit = billing.limits.liveRequestsPerMonth;
+  const pct   = Math.min((requests / limit) * 100, 100);
+  const warn  = pct >= 80;
+  const full  = pct >= 100;
+  const color = full ? "var(--danger)" : warn ? "var(--warn)" : "var(--accent)";
+
+  return (
+    <div style={{ marginBottom: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+        <span style={{ fontSize: 10, color: "var(--muted2)" }}>
+          {billing.plan}
+          {billing.payAsYouGo && (
+            <span style={{ marginLeft: 4, color: "var(--accent2)", fontSize: 9 }}>·PAYG</span>
+          )}
+        </span>
+        <Link href="/dashboard/billing" style={{ fontSize: 9, color: "var(--accent2)", textDecoration: "none" }}>
+          {billing.plan === "FREE" ? "Upgrade" : "Manage"}
+        </Link>
+      </div>
+      <div style={{ fontSize: 10, color: warn ? color : "var(--muted2)", marginBottom: 4 }}>
+        {requests.toLocaleString()} / {limit.toLocaleString()} requests
+        {full && !billing.payAsYouGo && " · quota reached"}
+      </div>
+      <div style={{ height: 3, background: "var(--border2)", borderRadius: 2 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 2, transition: "width 0.3s" }} />
+      </div>
+    </div>
+  );
+}
+
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router   = useRouter();
   const pathname = usePathname();
   const [email,   setEmail]   = useState("");
   const [userId,  setUserId]  = useState("");
   const [checked, setChecked] = useState(false);
+  const [billing, setBilling] = useState<BillingMe | null>(null);
   const [sysStatus, setSysStatus] = useState({ operational: true, message: "All systems operational" });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
@@ -65,6 +102,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         setEmail(d.email ?? "");
         setUserId(d.id ?? "");
         setChecked(true);
+        // fetch billing info in background
+        billingApi.me(token).then(setBilling).catch(() => undefined);
       })
       .catch(() => router.replace("/auth"));
   }, [router]);
@@ -143,8 +182,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-footer">
+          {/* Usage meter */}
+          {billing && billing.limits.liveRequestsPerMonth > 0 && (
+            <UsageMeter billing={billing} />
+          )}
+
           {/* Live system status from Firestore */}
-          <div>
+          <div style={{ marginTop: billing ? 10 : 0 }}>
             <span className="status-dot" style={{ background: sysStatus.operational ? "var(--accent)" : "var(--warn)" }} />
             {sysStatus.message}
           </div>

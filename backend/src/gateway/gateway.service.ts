@@ -8,6 +8,7 @@ import { RoutingService }       from '../routing/routing.service';
 import { LogsService }          from '../logs/logs.service';
 import { TokenCostService }     from '../common/token-cost.service';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
+import { BillingService }       from '../billing/billing.service';
 import { LLMProvider }          from '@prisma/client';
 import { ApiKeyContext }         from '../auth/decorators/api-key-context.decorator';
 
@@ -23,6 +24,7 @@ export class GatewayService {
     private readonly logs:      LogsService,
     private readonly cost:      TokenCostService,
     private readonly firebase:  FirebaseAdminService,
+    private readonly billing:   BillingService,
   ) {}
 
   async chatCompletions(req: Record<string, unknown>, ctx: ApiKeyContext) {
@@ -46,6 +48,10 @@ export class GatewayService {
       void this.firebase.writeUserPulse(ctx.userId, { lastRequestAt: new Date(), latestStatus: 200, latestModel: model, latestLatencyMs: latencyMs, latestCostUsd: 0, isTestMode: true, dailyCalls: 0, dailyCostUsd: 0, errorRate: 0 });
       return body;
     }
+
+    // ── Quota check ───────────────────────────────────────────────────────────
+    await this.billing.checkQuota(ctx.userId);
+    void this.billing.incrementUsage(ctx.userId);
 
     // ── Live mode: route + fallback ───────────────────────────────────────────
     const chain  = await this.routing.getFallbackChain(ctx.userId);

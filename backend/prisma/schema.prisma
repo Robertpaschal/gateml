@@ -21,6 +21,38 @@ enum Plan {
   ENTERPRISE
 }
 
+enum AdminRole {
+  SUPER_ADMIN
+  SUPPORT
+  ANALYST
+}
+
+enum MessageStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ContactCategory {
+  SUPPORT
+  ENTERPRISE_LEAD
+  GENERAL
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         AdminRole @default(SUPPORT)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+}
+
 model User {
   id               String   @id @default(cuid())
   firebaseUid      String   @unique
@@ -34,12 +66,35 @@ model User {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  apiKeys      ApiKey[]
-  providerKeys ProviderKey[]
-  requestLogs  RequestLog[]
-  prompts      Prompt[]
-  subscription Subscription?
-  usageRecords UsageRecord[]
+  apiKeys         ApiKey[]
+  providerKeys    ProviderKey[]
+  requestLogs     RequestLog[]
+  prompts         Prompt[]
+  subscription    Subscription?
+  usageRecords    UsageRecord[]
+  contactMessages ContactMessage[]
+}
+
+// ── Support Messages ──────────────────────────────────────────────────────────
+
+model ContactMessage {
+  id        String          @id @default(cuid())
+  userId    String?
+  email     String
+  name      String
+  company   String?
+  subject   String
+  body      String          @db.Text
+  category  ContactCategory @default(SUPPORT)
+  status    MessageStatus   @default(OPEN)
+  replyBody String?         @db.Text
+  repliedAt DateTime?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([category, status, createdAt(sort: Desc)])
 }
 
 // ── Billing ───────────────────────────────────────────────────────────────────

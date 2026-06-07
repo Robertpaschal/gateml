@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService }        from '../prisma/prisma.service';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
+import { EmailService }         from '../email/email.service';
 
 interface UpsertUserDto {
   firebaseUid: string;
@@ -15,6 +16,7 @@ export class UsersService {
   constructor(
     private readonly prisma:   PrismaService,
     private readonly firebase: FirebaseAdminService,
+    private readonly email:    EmailService,
   ) {}
 
   async upsert(dto: UpsertUserDto) {
@@ -31,8 +33,12 @@ export class UsersService {
     });
 
     const keyCount = await this.prisma.apiKey.count({ where: { userId: user.id } });
-    if (keyCount === 0) {
+    const isNewUser = keyCount === 0;
+    if (isNewUser) {
       await this.provisionDefaultKeys(user.id);
+      // Fire-and-forget — don't block login on email delivery
+      this.email.sendWelcome(user.email, user.name).catch(() => undefined);
+      this.email.notifyAdminNewUser(user.email, user.name, dto.provider).catch(() => undefined);
     }
 
     return user;

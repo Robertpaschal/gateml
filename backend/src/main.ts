@@ -13,16 +13,17 @@ async function bootstrap() {
   });
 
   const config = app.get(ConfigService);
-  const frontendUrl = config.get<string>('FRONTEND_URL', 'http://localhost:5173');
+  const frontendUrl  = config.get<string>('FRONTEND_URL',       'http://localhost:5173');
+  const adminUrl     = config.get<string>('ADMIN_FRONTEND_URL', 'http://localhost:3002');
 
   // Security headers
   app.use(helmet());
 
-  // CORS
+  // CORS — allow both consumer frontend and admin frontend
   app.enableCors({
-    origin: frontendUrl,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    origin:         [frontendUrl, adminUrl],
+    credentials:    true,
+    methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 

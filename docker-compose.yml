@@ -47,7 +47,7 @@ services:
       db:
         condition: service_healthy
 
-  # ── Next.js Frontend ────────────────────────────────────────────────────────
+  # ── Next.js Frontend (consumer) ─────────────────────────────────────────────
   frontend:
     build:
       context:    ./frontend
@@ -69,6 +69,29 @@ services:
       - ./frontend/src:/app/src:ro
     ports:
       - "3000:5173"   # Next.js dev runs on 5173 inside the container; expose as 3000 on host
+    depends_on:
+      - backend
+
+  # ── Admin Panel ──────────────────────────────────────────────────────────────
+  admin:
+    build:
+      context:    ./admin
+      dockerfile: Dockerfile
+      target:     builder          # builder stage has devDeps for next dev
+    command: npm run dev
+    restart: unless-stopped
+    environment:
+      # Browser calls the backend from the host machine
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      # Server-side rewrites (next.config.ts BACKEND_URL): Docker service name
+      BACKEND_URL: http://backend:3001
+      NODE_ENV:    development
+    volumes:
+      - ./admin/app:/app/app:ro
+      - ./admin/components:/app/components:ro
+      - ./admin/lib:/app/lib:ro
+    ports:
+      - "3002:3002"
     depends_on:
       - backend
 

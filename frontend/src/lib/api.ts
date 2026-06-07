@@ -138,3 +138,13 @@ export interface Stats {
 export const statsApi = {
   get: (token: string) => request<Stats>("/stats", {}, token),
 };
+
+// ── Support ───────────────────────────────────────────────────────────────────
+
+export const supportApi = {
+  contact: (token: string, subject: string, body: string) =>
+    request<{ id: string; status: string }>("/support/contact", {
+      method: "POST",
+      body:   JSON.stringify({ subject, body }),
+    }, token),
+};

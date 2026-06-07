@@ -1,8 +1,8 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation }      from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IsBoolean, IsString, IsArray, IsOptional, IsNumber, IsNotEmpty } from 'class-validator';
 import { SystemService }  from './system.service';
-import { JwtAuthGuard }   from '../auth/guards/jwt-auth.guard';
+import { AdminJwtGuard }  from '../admin-auth/guards/admin-jwt.guard';
 
 class SetStatusDto {
   @IsBoolean()             operational!: boolean;
@@ -25,29 +25,29 @@ class UpsertChangelogDto {
 export class SystemController {
   constructor(private readonly system: SystemService) {}
 
-  /** Update global system status (admin — protect with role guard in production). */
+  /** Update global system status — requires admin JWT. */
   @Post('status')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Update system status in Firestore (admin)' })
+  @UseGuards(AdminJwtGuard)
+  @ApiBearerAuth('jwt')
+  @ApiOperation({ summary: 'Update system status in Firestore (admin only)' })
   setStatus(@Body() dto: SetStatusDto) {
     return this.system.setStatus(dto.operational, dto.message, dto.affectedServices ?? []);
   }
 
-  /** Re-seed all hardcoded changelog entries to Firestore. */
+  /** Re-seed all hardcoded changelog entries to Firestore — requires admin JWT. */
   @Post('sync-changelog')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Re-sync all changelog entries to Firestore (admin)' })
+  @UseGuards(AdminJwtGuard)
+  @ApiBearerAuth('jwt')
+  @ApiOperation({ summary: 'Re-sync all changelog entries to Firestore (admin only)' })
   syncChangelog() {
     return this.system.seedChangelog();
   }
 
-  /**
-   * Add or update a single changelog entry — no redeploy needed.
-   * The `id` field is the Firestore document key (e.g. "v0.4.0").
-   */
+  /** Add or update a single changelog entry — requires admin JWT. */
   @Post('changelog')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Upsert a changelog entry in Firestore (admin)' })
+  @UseGuards(AdminJwtGuard)
+  @ApiBearerAuth('jwt')
+  @ApiOperation({ summary: 'Upsert a changelog entry in Firestore (admin only)' })
   upsertChangelog(@Body() dto: UpsertChangelogDto) {
     const { id, ...entry } = dto;
     return this.system.upsertEntry(id, entry);

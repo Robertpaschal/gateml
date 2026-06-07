@@ -1,6 +1,7 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService }   from '@nestjs/config';
 import { PrismaService }   from '../prisma/prisma.service';
+import { EmailService }    from '../email/email.service';
 import { Plan }            from '@prisma/client';
 import { PLAN_LIMITS, PlanKey } from './plan-limits';
 import StripeLib from 'stripe';
@@ -19,6 +20,7 @@ export class BillingService {
   constructor(
     private readonly prisma:  PrismaService,
     private readonly config:  ConfigService,
+    private readonly email:   EmailService,
   ) {
     const key = this.config.get<string>('STRIPE_SECRET_KEY');
     if (key) this.stripe = new StripeLib(key, { apiVersion: '2026-05-27.dahlia' });
@@ -38,7 +40,7 @@ export class BillingService {
     return { requests: record?.requests ?? 0, month };
   }
 
-  /** Throws 402 if over quota with no PAYG. */
+  /** Throws 402 if over quota with no PAYG. Fires warning emails at 80% and 100%. */
   async checkQuota(userId: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
@@ -47,7 +49,18 @@ export class BillingService {
     if (lim === -1) return; // unlimited (Enterprise)
 
     const { requests } = await this.getUsage(userId);
+
+    // Fire quota warning at 80% (once — only at the exact threshold request)
+    if (requests === Math.floor(lim * 0.8)) {
+      this.email.sendQuotaWarning(user.email, user.name, requests, lim).catch(() => undefined);
+    }
+
     if (requests < lim) return;
+
+    // Fire quota-exceeded email at 100% (once)
+    if (requests === lim) {
+      this.email.sendQuotaExceeded(user.email, user.name).catch(() => undefined);
+    }
 
     if (user.payAsYouGo) return;
 
@@ -192,7 +205,12 @@ export class BillingService {
     const periodStart = new Date((sub.current_period_start as number) * 1000);
     const periodEnd   = new Date((sub.current_period_end   as number) * 1000);
 
+    const prevUser = await this.prisma.user.findUnique({ where: { id: userId }, select: { plan: true, email: true, name: true } });
     await this.prisma.user.update({ where: { id: userId }, data: { plan } });
+
+    if (prevUser && prevUser.plan !== plan && isActive) {
+      this.email.sendPlanUpgraded(prevUser.email, prevUser.name, plan).catch(() => undefined);
+    }
 
     await this.prisma.subscription.upsert({
       where:  { stripeSubId: sub.id as string },

@@ -32,8 +32,138 @@ const ENTERPRISE_FEATURES = [
   "Custom contract & invoicing",
 ];
 
+// ── Enterprise contact modal ───────────────────────────────────────────────────
+
+const BASE = typeof window !== "undefined" && process.env.NEXT_PUBLIC_API_URL
+  ? process.env.NEXT_PUBLIC_API_URL
+  : "/api";
+
+function EnterpriseModal({ onClose }: { onClose: () => void }) {
+  const [form,    setForm]    = useState({ name: "", email: "", company: "", body: "" });
+  const [sending, setSending] = useState(false);
+  const [sent,    setSent]    = useState(false);
+  const [error,   setError]   = useState("");
+
+  function set(k: keyof typeof form, v: string) {
+    setForm(prev => ({ ...prev, [k]: v }));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSending(true);
+    setError("");
+    try {
+      const res = await fetch(`${BASE}/support/public`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          name:     form.name,
+          email:    form.email,
+          company:  form.company,
+          subject:  "Enterprise plan inquiry",
+          body:     form.body,
+          category: "ENTERPRISE_LEAD",
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { message?: string };
+        throw new Error(d.message ?? `HTTP ${res.status}`);
+      }
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="modal" style={{ maxWidth: 480 }}>
+        {sent ? (
+          <div style={{ textAlign: "center", padding: "12px 0" }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
+            <div className="modal-title">Message received</div>
+            <div className="modal-sub" style={{ marginBottom: 24 }}>
+              We'll reach out to <strong>{form.email}</strong> within one business day to
+              discuss your use case and put together a custom quote.
+            </div>
+            <button className="btn btn-ghost" onClick={onClose}>Close</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <div className="modal-title">Talk to us about Enterprise</div>
+              <div className="modal-sub">
+                Unlimited requests, custom SLA, SSO, and dedicated support.
+                Tell us about your team and we'll follow up within one business day.
+              </div>
+            </div>
+
+            {error && (
+              <div style={{
+                padding: "9px 12px", marginBottom: 14, borderRadius: 4,
+                background: "rgba(255,59,92,0.1)", border: "1px solid rgba(255,59,92,0.3)",
+                color: "var(--danger)", fontSize: 11,
+              }}>
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={submit}>
+              <div className="form-row">
+                <div className="form-col">
+                  <label className="form-label">Your name</label>
+                  <input className="field" value={form.name} onChange={e => set("name", e.target.value)}
+                    placeholder="Alex Johnson" required />
+                </div>
+                <div className="form-col">
+                  <label className="form-label">Work email</label>
+                  <input className="field" type="email" value={form.email} onChange={e => set("email", e.target.value)}
+                    placeholder="alex@company.com" required />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label className="form-label">Company</label>
+                <input className="field" value={form.company} onChange={e => set("company", e.target.value)}
+                  placeholder="Acme Corp" required />
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label className="form-label">
+                  Tell us about your use case
+                  <span style={{ fontWeight: 400, textTransform: "none", color: "var(--muted2)", marginLeft: 4 }}>
+                    — volume, providers, what you're building
+                  </span>
+                </label>
+                <textarea className="field" value={form.body} onChange={e => set("body", e.target.value)}
+                  rows={4} placeholder="We process ~500k requests/month across OpenAI and Anthropic…"
+                  required style={{ resize: "vertical" }} />
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={sending}>
+                  {sending ? "Sending…" : "Send message"}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Pricing component ─────────────────────────────────────────────────────
+
 export function Pricing() {
-  const [annual, setAnnual] = useState(false);
+  const [annual,          setAnnual]          = useState(false);
+  const [showEnterprise,  setShowEnterprise]  = useState(false);
 
   return (
     <section className="section" id="pricing" style={{ borderTop: "1px solid var(--border)" }}>
@@ -107,19 +237,26 @@ export function Pricing() {
         </div>
 
         {/* Enterprise */}
-        <div className="pricing-card">
+        <div className="pricing-card" style={{ display: "flex", flexDirection: "column" }}>
           <div className="pricing-name">Enterprise</div>
           <div className="pricing-desc">Unlimited scale, SLA, and dedicated support.</div>
           <div className="pricing-price">
             Custom<span />
           </div>
-          <ul className="pricing-features">
+          <ul className="pricing-features" style={{ flex: 1 }}>
             {ENTERPRISE_FEATURES.map(f => <li key={f}>{f}</li>)}
           </ul>
-          <a href="mailto:hello@gateml.io" className="btn-ghost-lg"
-            style={{ width: "100%", justifyContent: "center", display: "flex" }}>
-            Contact us
-          </a>
+          <button
+            className="btn-ghost-lg"
+            style={{ width: "100%", textAlign: "center", cursor: "pointer",
+                     background: "transparent", fontFamily: "var(--font-mono)" }}
+            onClick={() => setShowEnterprise(true)}
+          >
+            Talk to us
+          </button>
+          <p style={{ fontSize: 10, color: "var(--muted2)", textAlign: "center", marginTop: 10 }}>
+            Response within 1 business day
+          </p>
         </div>
       </div>
 
@@ -140,6 +277,8 @@ export function Pricing() {
           no upfront commitment.
         </span>
       </div>
+
+      {showEnterprise && <EnterpriseModal onClose={() => setShowEnterprise(false)} />}
     </section>
   );
 }

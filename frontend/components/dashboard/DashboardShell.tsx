@@ -25,6 +25,7 @@ const NAV = [
   { href: "/dashboard/testing",  label: "Eval Testing",  icon: "test" },
   { href: "/dashboard/replay",   label: "Replay",        icon: "replay" },
   { href: "/dashboard/billing",  label: "Billing",       icon: "billing" },
+  { href: "/dashboard/support",  label: "Support",       icon: "support" },
 ];
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -36,6 +37,7 @@ const ICONS: Record<string, React.ReactNode> = {
   replay:    <><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></>,
   billing:   <><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></>,
   logout:    <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>,
+  support:   <><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></>,
 };
 
 function NavIcon({ name }: { name: string }) {

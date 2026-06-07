@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { keysApi, providerKeysApi, routingApi } from "../lib/api";
+import { keysApi, providerKeysApi, routingApi, billingApi } from "../lib/api";
 import { useToken } from "../hooks/useToken";
 import { Icon } from "../components/Icons";
 import type { ApiKey, ProviderKey, RoutingConfig } from "../types";
@@ -19,6 +19,25 @@ const PROVIDER_LABELS: Record<string, { name: string; placeholder: string }> = {
   google:    { name: "Google AI", placeholder: "AIza..." },
 };
 
+function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () => void }) {
+  return (
+    <button
+      onClick={onChange}
+      style={{
+        width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer",
+        background: enabled ? "var(--accent2)" : "var(--border2)",
+        position: "relative", transition: "background 0.2s", flexShrink: 0,
+      }}
+    >
+      <span style={{
+        position: "absolute", top: 3, left: enabled ? 20 : 3,
+        width: 16, height: 16, borderRadius: "50%", background: "#000",
+        transition: "left 0.2s",
+      }} />
+    </button>
+  );
+}
+
 export function GatewayPage() {
   const token = useToken();
   const [tab, setTab] = useState<Tab>("keys");
@@ -26,16 +45,24 @@ export function GatewayPage() {
   const [providerKeys, setProviderKeys] = useState<ProviderKey[]>([]);
   const [routing, setRouting] = useState<RoutingConfig>({ primaryModel: "gpt-4o", fallbackChain: [] });
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyType, setNewKeyType] = useState<"test" | "live">("test");
-  const [newKeyResult, setNewKeyResult] = useState<ApiKey | null>(null);
+  const [newKeyType, setNewKeyType] = useState<"TEST" | "LIVE">("TEST");
+  const [newKeyResult, setNewKeyResult] = useState<(ApiKey & { key: string }) | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [providerInputs, setProviderInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [useManaged, setUseManaged] = useState(false);
+  const [managedLoading, setManagedLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) return;
-    const [k, pk, r] = await Promise.all([keysApi.list(token), providerKeysApi.list(token), routingApi.get(token)]);
+    const [k, pk, r, billing] = await Promise.all([
+      keysApi.list(token),
+      providerKeysApi.list(token),
+      routingApi.get(token),
+      billingApi.me(token),
+    ]);
     setApiKeys(k); setProviderKeys(pk); setRouting(r);
+    setUseManaged(billing.useManaged);
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
@@ -74,6 +101,15 @@ export function GatewayPage() {
     setTimeout(() => setCopied(null), 2000);
   };
 
+  const toggleManaged = async () => {
+    if (!token || managedLoading) return;
+    setManagedLoading(true);
+    try {
+      const { useManaged: next } = await billingApi.toggleManaged(token, !useManaged);
+      setUseManaged(next);
+    } finally { setManagedLoading(false); }
+  };
+
   const isConnected = (p: string) => providerKeys.some(k => k.provider === p);
 
   return (
@@ -98,9 +134,9 @@ export function GatewayPage() {
               </div>
               <div className="form-col" style={{ maxWidth: 140 }}>
                 <label className="form-label">Type</label>
-                <select className="field" value={newKeyType} onChange={e => setNewKeyType(e.target.value as "test"|"live")}>
-                  <option value="test">Test</option>
-                  <option value="live">Live</option>
+                <select className="field" value={newKeyType} onChange={e => setNewKeyType(e.target.value as "TEST"|"LIVE")}>
+                  <option value="TEST">Test</option>
+                  <option value="LIVE">Live</option>
                 </select>
               </div>
               <button className="btn btn-primary" onClick={createKey} disabled={!newKeyName.trim()}>
@@ -136,9 +172,9 @@ export function GatewayPage() {
                   {apiKeys.map(k => (
                     <tr key={k.id}>
                       <td style={{ fontWeight: 500 }}>{k.name}</td>
-                      <td><span className={`tag tag-${k.type === "live" ? "orange" : "blue"}`}>{k.type}</span></td>
-                      <td><code style={{ fontSize: 11, color: "var(--muted)" }}>{k.key}</code></td>
-                      <td style={{ color: "var(--muted)", fontSize: 10 }}>{k.last_used_at ? new Date(k.last_used_at * 1000).toLocaleDateString() : "Never"}</td>
+                      <td><span className={`tag tag-${k.type === "LIVE" ? "orange" : "blue"}`}>{k.type}</span></td>
+                      <td><code style={{ fontSize: 11, color: "var(--muted)" }}>{k.keyPrefix}…</code></td>
+                      <td style={{ color: "var(--muted)", fontSize: 10 }}>{k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : "Never"}</td>
                       <td>
                         <button className="btn btn-danger" style={{ padding: "3px 8px" }} onClick={() => revokeKey(k.id)}>
                           <Icon name="trash" size={10} /> Revoke
@@ -156,9 +192,54 @@ export function GatewayPage() {
       {/* ── Provider Keys ── */}
       {tab === "providers" && (
         <div>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 16 }}>
-            GateML routes through your own provider API keys. Stored encrypted with AES-256.
+          {/* GateML Managed Keys toggle */}
+          <div className="card" style={{
+            marginBottom: 20,
+            borderColor: useManaged ? "var(--accent2)" : "var(--border)",
+            background: useManaged ? "rgba(0,201,255,0.04)" : undefined,
+          }}>
+            <div className="card-header">
+              <div style={{ flex: 1 }}>
+                <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  GateML Managed Keys
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                    background: "rgba(0,201,255,0.12)", color: "var(--accent2)",
+                    border: "1px solid rgba(0,201,255,0.25)", borderRadius: 4, padding: "1px 6px",
+                  }}>BETA</span>
+                </div>
+                <div className="card-sub">
+                  No API key setup required. GateML routes through its own provider keys — billed at provider cost + 20% markup, tracked in your billing dashboard.
+                </div>
+              </div>
+              <Toggle enabled={useManaged} onChange={toggleManaged} />
+            </div>
+            {useManaged && (
+              <div style={{
+                marginTop: 12, padding: "10px 12px", borderRadius: 6,
+                background: "rgba(0,201,255,0.06)", border: "1px solid rgba(0,201,255,0.15)",
+                fontSize: 11, color: "var(--muted)", lineHeight: 1.6,
+              }}>
+                <strong style={{ color: "var(--accent2)" }}>Active</strong> — GateML&apos;s provider keys are used for any provider where you haven&apos;t added your own. Your own keys (BYOK) always take priority.
+                <br />
+                <span style={{ color: "var(--muted2)" }}>Token usage is billed monthly. View accrued costs in your Billing dashboard.</span>
+              </div>
+            )}
           </div>
+
+          {/* Divider */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            <span style={{ fontSize: 10, color: "var(--muted2)", whiteSpace: "nowrap" }}>
+              {useManaged ? "BYOK keys override managed for each provider" : "Bring your own provider keys"}
+            </span>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 14 }}>
+            Your own keys are stored encrypted with AES-256 and take priority over managed keys.
+          </div>
+
           {["openai","anthropic","google"].map(p => {
             const label = PROVIDER_LABELS[p];
             const connected = isConnected(p);
@@ -168,9 +249,17 @@ export function GatewayPage() {
                   <div>
                     <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       {label.name}
-                      <span className={`tag tag-${connected ? "green" : "gray"}`} style={{ fontSize: 9 }}>{connected ? "connected" : "not set"}</span>
+                      <span className={`tag tag-${connected ? "green" : useManaged ? "blue" : "gray"}`} style={{ fontSize: 9 }}>
+                        {connected ? "your key" : useManaged ? "managed" : "not set"}
+                      </span>
                     </div>
-                    <div className="card-sub">{connected ? "Enter a new value to replace." : `Paste your ${label.name} API key`}</div>
+                    <div className="card-sub">
+                      {connected
+                        ? "Using your key. Enter a new value to replace."
+                        : useManaged
+                          ? `Using GateML managed key (cost + 20%). Add your own to override.`
+                          : `Paste your ${label.name} API key to enable live requests.`}
+                    </div>
                   </div>
                   {connected && <button className="btn btn-danger" style={{ fontSize: 10 }} onClick={() => removeProviderKey(p)}><Icon name="trash" size={10} /> Remove</button>}
                 </div>

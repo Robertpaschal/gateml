@@ -70,6 +70,53 @@ export class AdminService {
     };
   }
 
+  // ── Accounting ────────────────────────────────────────────────────────────
+
+  async getAccounting() {
+    const now   = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const [activeSubs, canceledThisMonth, managedUsage, managedPrev, recentSubs] = await Promise.all([
+      this.prisma.subscription.count({ where: { status: 'active' } }),
+      this.prisma.subscription.count({
+        where: { status: 'canceled', updatedAt: { gte: new Date(now.getFullYear(), now.getMonth(), 1) } },
+      }),
+      this.prisma.usageRecord.aggregate({
+        where: { month },
+        _sum: { managedCostUsd: true, tokensUsed: true, requests: true },
+      }),
+      this.prisma.usageRecord.aggregate({
+        where: { month: prevMonth },
+        _sum: { managedCostUsd: true },
+      }),
+      this.prisma.subscription.findMany({
+        where:   { status: 'active' },
+        orderBy: { createdAt: 'desc' },
+        take:    10,
+        include: { user: { select: { email: true, name: true, plan: true } } },
+      }),
+    ]);
+
+    const mrrUsd          = activeSubs * 19; // PRO = $19/mo
+    const managedRevenue  = (managedUsage._sum.managedCostUsd ?? 0);
+    const managedPrevious = (managedPrev._sum.managedCostUsd  ?? 0);
+
+    return {
+      mrrUsd,
+      activeSubscriptions: activeSubs,
+      canceledThisMonth,
+      managedRevenue: {
+        current:  Math.round(managedRevenue  * 100) / 100,
+        previous: Math.round(managedPrevious * 100) / 100,
+      },
+      managedTokensThisMonth: managedUsage._sum.tokensUsed ?? 0,
+      totalRequestsThisMonth: managedUsage._sum.requests   ?? 0,
+      recentSubscriptions:    recentSubs,
+    };
+  }
+
   // ── Users ──────────────────────────────────────────────────────────────────
 
   async listUsers(search?: string, page = 1, limit = 25) {
@@ -174,16 +221,7 @@ export class AdminService {
       where: { id },
       data:  { replyBody, repliedAt: new Date(), status: 'RESOLVED', updatedAt: new Date() },
     });
-    await this.email.send(
-      msg.email,
-      `Re: ${msg.subject}`,
-      `<p>Hi ${msg.name},</p>
-<p>Thanks for contacting GateML support. Here's our reply:</p>
-<hr/>
-<p>${replyBody.replace(/\n/g, '<br/>')}</p>
-<hr/>
-<p>— The GateML team</p>`,
-    );
+    this.email.sendSupportReply(msg.email, msg.name, msg.subject, replyBody, id);
     return msg;
   }
 

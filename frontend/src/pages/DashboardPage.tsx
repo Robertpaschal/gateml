@@ -81,7 +81,7 @@ export function DashboardPage() {
           </div>
         ) : logs.map(l => (
           <div key={l.id} className="log-entry">
-            <div className="log-time">{new Date(l.created_at * 1000).toLocaleTimeString()}</div>
+            <div className="log-time">{new Date(l.createdAt).toLocaleTimeString()}</div>
             <div style={{ minWidth: 36 }}>
               <span className={`tag tag-${l.status < 400 ? "green" : l.status === 429 ? "yellow" : "red"}`} style={{ fontSize: 9 }}>
                 {l.status}
@@ -90,7 +90,7 @@ export function DashboardPage() {
             <div className="log-body">
               <div className="log-path">{l.path}</div>
               <div className="log-meta">
-                {l.model} · {l.latency_ms}ms · {(l.prompt_tokens + l.completion_tokens).toLocaleString()} tokens · ${l.cost_usd.toFixed(4)}
+                {l.model} · {l.latencyMs}ms · {(l.promptTokens + l.completionTokens).toLocaleString()} tokens · ${l.costUsd.toFixed(4)}
               </div>
             </div>
           </div>

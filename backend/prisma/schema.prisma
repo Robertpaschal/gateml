@@ -43,28 +43,76 @@ enum ContactCategory {
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
 model AdminUser {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  name         String
-  role         AdminRole @default(SUPPORT)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  lastLoginAt  DateTime?
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String?   // null until invite is accepted
+  name          String
+  role          AdminRole @default(SUPPORT)
+  isActive      Boolean   @default(true)
+  inviteToken   String?   @unique
+  inviteExpiry  DateTime?
+  invitedBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  invitedByAdmin AdminUser?  @relation("AdminInvites", fields: [invitedBy], references: [id])
+  invitees       AdminUser[] @relation("AdminInvites")
+  auditLogs      AuditLog[]
+}
+
+// ── Admin domain allowlist ────────────────────────────────────────────────────
+
+model AdminDomain {
+  id        String   @id @default(cuid())
+  domain    String   @unique // e.g. "gateml.com"
+  createdAt DateTime @default(now())
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  adminId    String?
+  userId     String?
+  action     String   // e.g. "user.plan_changed", "admin.login", "key.created"
+  resource   String   // e.g. "user", "apiKey", "contactMessage"
+  resourceId String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  admin AdminUser? @relation(fields: [adminId], references: [id])
+
+  @@index([resource, resourceId])
+  @@index([adminId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
 }
 
 model User {
-  id               String   @id @default(cuid())
-  firebaseUid      String   @unique
-  email            String   @unique
-  name             String?
-  avatarUrl        String?
-  provider         String   // "google" | "github" | "apple" | "email"
-  plan             Plan     @default(FREE)
-  stripeCustomerId String?  @unique
-  payAsYouGo       Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                       String    @id @default(cuid())
+  firebaseUid              String?   @unique
+  email                    String    @unique
+  name                     String?
+  avatarUrl                String?
+  provider                 String    // "google" | "github" | "apple" | "email"
+  plan                     Plan      @default(FREE)
+  stripeCustomerId         String?   @unique
+  payAsYouGo               Boolean   @default(false)
+  useManaged               Boolean   @default(false)
+
+  // In-house email/password auth (optional — null for OAuth-only users)
+  passwordHash             String?
+  emailVerified            Boolean   @default(false)
+  emailVerificationToken   String?   @unique
+  emailVerificationExpiry  DateTime?
+  passwordResetToken       String?   @unique
+  passwordResetExpiry      DateTime?
+
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   apiKeys         ApiKey[]
   providerKeys    ProviderKey[]
@@ -116,10 +164,12 @@ model Subscription {
 
 model UsageRecord {
   id        String   @id @default(cuid())
-  userId    String
-  month     String   // "2026-06" — calendar month bucket
-  requests  Int      @default(0)
-  updatedAt DateTime @updatedAt
+  userId         String
+  month          String   // "2026-06" — calendar month bucket
+  requests       Int      @default(0)
+  tokensUsed     Int      @default(0)
+  managedCostUsd Float    @default(0)
+  updatedAt      DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

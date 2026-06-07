@@ -5,6 +5,7 @@ import Link from "next/link";
 const FREE_FEATURES = [
   "1,000 live requests / month",
   "Unlimited test mode requests",
+  "GateML Managed Keys (no setup)",
   "Basic observability dashboard",
   "1 API key pair",
   "7-day log retention (last 100)",
@@ -14,6 +15,7 @@ const FREE_FEATURES = [
 const PRO_FEATURES = [
   "30,000 live requests / month",
   "Full observability + cost tracking",
+  "GateML Managed Keys (no setup)",
   "Prompt library + version diffs",
   "Eval testing suite",
   "Fallback chain configuration",
@@ -260,22 +262,40 @@ export function Pricing() {
         </div>
       </div>
 
-      {/* Pay-as-you-go callout */}
-      <div style={{
-        marginTop: 32, padding: "18px 24px",
-        background: "rgba(0,201,255,0.04)", border: "1px solid rgba(0,201,255,0.15)",
-        borderRadius: 8, display: "flex", alignItems: "center", gap: 16,
-      }}>
-        <span style={{
-          fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: "var(--accent2)",
-          whiteSpace: "nowrap",
-        }}>Pay-as-you-go</span>
-        <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
-          Have a busy day? Enable pay-as-you-go in your billing settings and continue beyond your
-          monthly quota at <strong style={{ color: "var(--text)" }}>$0.002/request</strong> (Starter)
-          or <strong style={{ color: "var(--text)" }}>$0.001/request</strong> (Pro) — billed monthly,
-          no upfront commitment.
-        </span>
+      {/* Pay-as-you-go + Managed Keys callouts */}
+      <div style={{ marginTop: 32, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{
+          padding: "18px 24px",
+          background: "rgba(0,201,255,0.04)", border: "1px solid rgba(0,201,255,0.15)",
+          borderRadius: 8, display: "flex", alignItems: "center", gap: 16,
+        }}>
+          <span style={{
+            fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: "var(--accent2)",
+            whiteSpace: "nowrap",
+          }}>Managed Keys</span>
+          <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
+            Don&apos;t want to manage provider API keys? Enable <strong style={{ color: "var(--text)" }}>GateML Managed Keys</strong> — GateML
+            routes through its own provider accounts and bills you per-token at provider cost + 20% markup.
+            Available on all plans, no credit card required to start.
+          </span>
+        </div>
+
+        <div style={{
+          padding: "18px 24px",
+          background: "rgba(0,255,136,0.03)", border: "1px solid rgba(0,255,136,0.12)",
+          borderRadius: 8, display: "flex", alignItems: "center", gap: 16,
+        }}>
+          <span style={{
+            fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: "var(--accent)",
+            whiteSpace: "nowrap",
+          }}>Pay-as-you-go</span>
+          <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
+            Hit your monthly limit? Enable pay-as-you-go and keep going at{" "}
+            <strong style={{ color: "var(--text)" }}>$0.002/request</strong> (Starter) or{" "}
+            <strong style={{ color: "var(--text)" }}>$0.001/request</strong> (Pro) — billed monthly,
+            no upfront commitment.
+          </span>
+        </div>
       </div>
 
       {showEnterprise && <EnterpriseModal onClose={() => setShowEnterprise(false)} />}

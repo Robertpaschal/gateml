@@ -1,31 +1,30 @@
 import {
-  Controller, Get, Patch, Body, Param, Query,
+  Controller, Get, Patch, Body, Param, Query, Req,
   UseGuards, ParseIntPipe, DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsEnum, IsString, IsNotEmpty, IsOptional } from 'class-validator';
-import { Plan } from '@prisma/client';
+import { Plan }          from '@prisma/client';
+import { Request }       from 'express';
 import { AdminService }  from './admin.service';
 import { AdminJwtGuard } from '../admin-auth/guards/admin-jwt.guard';
+import { GetAdminUser }  from '../admin-auth/decorators/admin-user.decorator';
+import { AuditService }  from '../audit/audit.service';
+import type { AdminUser } from '@prisma/client';
 
-class UpdatePlanDto {
-  @IsEnum(Plan) plan!: Plan;
-}
-
-class ReplyDto {
-  @IsString() @IsNotEmpty() body!: string;
-}
-
-class UpdateStatusDto {
-  @IsString() @IsNotEmpty() @IsOptional() status?: string;
-}
+class UpdatePlanDto { @IsEnum(Plan)                          plan!:   Plan;   }
+class ReplyDto       { @IsString() @IsNotEmpty()             body!:   string; }
+class UpdateStatusDto{ @IsString() @IsNotEmpty() @IsOptional() status?: string; }
 
 @ApiTags('admin')
 @Controller('admin')
 @UseGuards(AdminJwtGuard)
 @ApiBearerAuth('jwt')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly audit: AuditService,
+  ) {}
 
   // ── Analytics ──────────────────────────────────────────────────────────────
 
@@ -33,6 +32,14 @@ export class AdminController {
   @ApiOperation({ summary: 'Platform analytics overview' })
   analytics() {
     return this.admin.getAnalytics();
+  }
+
+  // ── Accounting ────────────────────────────────────────────────────────────
+
+  @Get('accounting')
+  @ApiOperation({ summary: 'Revenue and billing summary (Stripe + managed usage)' })
+  accounting() {
+    return this.admin.getAccounting();
   }
 
   // ── Users ──────────────────────────────────────────────────────────────────
@@ -55,8 +62,14 @@ export class AdminController {
 
   @Patch('users/:id/plan')
   @ApiOperation({ summary: 'Override a user plan' })
-  updatePlan(@Param('id') id: string, @Body() body: UpdatePlanDto) {
-    return this.admin.updateUserPlan(id, body.plan);
+  async updatePlan(
+    @Param('id') id: string, @Body() body: UpdatePlanDto,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.admin.updateUserPlan(id, body.plan);
+    await this.audit.log({ adminId: admin.id, resource: 'user', resourceId: id,
+      action: 'user.plan_changed', metadata: { plan: body.plan }, req });
+    return result;
   }
 
   // ── Support messages ───────────────────────────────────────────────────────
@@ -80,13 +93,40 @@ export class AdminController {
 
   @Patch('messages/:id/reply')
   @ApiOperation({ summary: 'Reply to a support message (sends email)' })
-  reply(@Param('id') id: string, @Body() body: ReplyDto) {
-    return this.admin.replyToMessage(id, body.body);
+  async reply(
+    @Param('id') id: string, @Body() body: ReplyDto,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.admin.replyToMessage(id, body.body);
+    await this.audit.log({ adminId: admin.id, resource: 'contactMessage', resourceId: id,
+      action: 'message.replied', req });
+    return result;
   }
 
   @Patch('messages/:id/status')
   @ApiOperation({ summary: 'Update message status' })
-  updateStatus(@Param('id') id: string, @Body() body: UpdateStatusDto) {
-    return this.admin.updateMessageStatus(id, body.status!);
+  async updateStatus(
+    @Param('id') id: string, @Body() body: UpdateStatusDto,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.admin.updateMessageStatus(id, body.status!);
+    await this.audit.log({ adminId: admin.id, resource: 'contactMessage', resourceId: id,
+      action: 'message.status_changed', metadata: { status: body.status }, req });
+    return result;
+  }
+
+  // ── Audit log ──────────────────────────────────────────────────────────────
+
+  @Get('audit')
+  @ApiOperation({ summary: 'Query audit log' })
+  auditLog(
+    @Query('resource')  resource?:  string,
+    @Query('action')    action?:    string,
+    @Query('adminId')   adminId?:   string,
+    @Query('userId')    userId?:    string,
+    @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page  = 1,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
+  ) {
+    return this.audit.query({ resource, action, adminId, userId, page, limit });
   }
 }

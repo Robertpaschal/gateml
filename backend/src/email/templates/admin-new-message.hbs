@@ -1,0 +1,17 @@
+<h1>{{categoryLabel}}: {{fromName}}{{#if company}} ({{company}}){{/if}}</h1>
+
+<div class="highlight">
+  <p style="margin:0 0 8px;">
+    <span class="badge {{categoryBadge}}">{{categoryLabel}}</span>
+    &nbsp;
+    <strong style="color:#e5e5e5;">{{subject}}</strong>
+  </p>
+  <p style="margin:2px 0;font-size:13px;color:#9ca3af;"><strong>From:</strong> {{fromName}} &lt;{{fromEmail}}&gt;</p>
+  {{#if company}}<p style="margin:2px 0;font-size:13px;color:#9ca3af;"><strong>Company:</strong> {{company}}</p>{{/if}}
+</div>
+
+<p style="font-size:14px;color:#e5e5e5;white-space:pre-line;background:#1a1a1a;padding:16px;border-radius:8px;">{{body}}</p>
+
+<p style="text-align:center;margin:24px 0;">
+  <a class="btn" href="{{adminUrl}}/dashboard/messages/{{messageId}}">Reply in Admin Panel</a>
+</p>

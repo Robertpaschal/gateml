@@ -43,12 +43,12 @@ export function ReplayPage() {
           }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
               <span className={`tag tag-${r.status < 400 ? "green" : r.status === 429 ? "yellow" : "red"}`} style={{ fontSize: 9 }}>{r.status}</span>
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>{new Date(r.created_at * 1000).toLocaleTimeString()}</span>
-              <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--muted)" }}>{r.latency_ms}ms</span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{new Date(r.createdAt).toLocaleTimeString()}</span>
+              <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--muted)" }}>{r.latencyMs}ms</span>
             </div>
             <div style={{ fontSize: 11 }}>{r.model}</div>
             <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-              {(r.prompt_tokens + r.completion_tokens).toLocaleString()} tokens · ${r.cost_usd.toFixed(4)}
+              {(r.promptTokens + r.completionTokens).toLocaleString()} tokens · ${r.costUsd.toFixed(4)}
             </div>
           </div>
         ))}
@@ -60,7 +60,7 @@ export function ReplayPage() {
             <div className="card-header">
               <div>
                 <div className="card-title">Request Detail</div>
-                <div className="card-sub">{new Date(sel.created_at * 1000).toLocaleString()} · {sel.model}</div>
+                <div className="card-sub">{new Date(sel.createdAt).toLocaleString()} · {sel.model}</div>
               </div>
               <button className="btn btn-ghost" onClick={copyCurl}>
                 <Icon name="copy" size={11} /> {copied ? "Copied!" : "Copy as cURL"}
@@ -69,9 +69,9 @@ export function ReplayPage() {
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
               {[
                 ["Status", sel.status, sel.status < 400 ? "var(--accent)" : "var(--danger)"],
-                ["Latency", `${sel.latency_ms}ms`, "var(--text)"],
-                ["Tokens", (sel.prompt_tokens + sel.completion_tokens).toLocaleString(), "var(--text)"],
-                ["Cost", `$${sel.cost_usd.toFixed(4)}`, "var(--accent3)"],
+                ["Latency", `${sel.latencyMs}ms`, "var(--text)"],
+                ["Tokens", (sel.promptTokens + sel.completionTokens).toLocaleString(), "var(--text)"],
+                ["Cost", `$${sel.costUsd.toFixed(4)}`, "var(--accent3)"],
                 ["Provider", sel.provider, "var(--muted)"],
               ].map(([k, v, c]) => (
                 <div key={k as string} style={{ background: "var(--surface2)", borderRadius: 4, padding: "8px 14px" }}>
@@ -82,8 +82,8 @@ export function ReplayPage() {
             </div>
             <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "1px" }}>Token Usage</div>
             <div style={{ display: "flex", gap: 24, fontSize: 12, padding: "10px 0", borderBottom: "1px solid var(--border)", marginBottom: 16 }}>
-              <span>Prompt: <strong style={{ color: "var(--accent2)" }}>{sel.prompt_tokens.toLocaleString()}</strong></span>
-              <span>Completion: <strong style={{ color: "var(--accent)" }}>{sel.completion_tokens.toLocaleString()}</strong></span>
+              <span>Prompt: <strong style={{ color: "var(--accent2)" }}>{sel.promptTokens.toLocaleString()}</strong></span>
+              <span>Completion: <strong style={{ color: "var(--accent)" }}>{sel.completionTokens.toLocaleString()}</strong></span>
             </div>
             <div style={{ padding: "10px 14px", background: "var(--surface2)", borderRadius: 4, fontSize: 11, color: "var(--muted)" }}>
               Full request/response bodies are not stored to protect your privacy. Use cURL to replay.

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Navbar } from "@/components/marketing/Navbar";
 import { Hero } from "@/components/marketing/Hero";
+import { WhyGateML } from "@/components/marketing/WhyGateML";
 import { Features } from "@/components/marketing/Features";
 import { HowItWorks } from "@/components/marketing/HowItWorks";
 import { CodeShowcase } from "@/components/marketing/CodeShowcase";
@@ -21,6 +22,7 @@ export default function HomePage() {
       <Navbar />
       <main>
         <Hero />
+        <WhyGateML />
         <Features />
         <HowItWorks />
         <CodeShowcase />

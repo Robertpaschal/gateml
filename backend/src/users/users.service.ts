@@ -32,16 +32,20 @@ export class UsersService {
       },
     });
 
-    const keyCount = await this.prisma.apiKey.count({ where: { userId: user.id } });
+    const keyCount  = await this.prisma.apiKey.count({ where: { userId: user.id } });
     const isNewUser = keyCount === 0;
     if (isNewUser) {
-      await this.provisionDefaultKeys(user.id);
-      // Fire-and-forget — don't block login on email delivery
-      this.email.sendWelcome(user.email, user.name).catch(() => undefined);
-      this.email.notifyAdminNewUser(user.email, user.name, dto.provider).catch(() => undefined);
+      await this.provisionForNewUser(user.id, user.email, user.name, dto.provider);
     }
 
     return user;
+  }
+
+  /** Called for both OAuth and in-house registrations. */
+  async provisionForNewUser(userId: string, email: string, name: string | null, provider: string) {
+    await this.provisionDefaultKeys(userId);
+    this.email.sendWelcome(email, name);
+    this.email.notifyAdminNewUser(email, name, provider);
   }
 
   findById(id: string) {

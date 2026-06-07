@@ -17,6 +17,17 @@ async function exchangeFirebaseToken(idToken: string): Promise<{ token: string; 
   return data as { token: string; user: { id: string; email: string } };
 }
 
+async function localAuth(path: string, body: Record<string, string>): Promise<{ token?: string; message?: string }> {
+  const res  = await fetch(`${API}${path}`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(body),
+  });
+  const data = await res.json() as { token?: string; message?: string };
+  if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
+  return data;
+}
+
 function setSession(token: string) {
   document.cookie = `gateml_token=${token}; path=/; max-age=2592000; SameSite=Lax`;
   localStorage.setItem("gateml_token", token);
@@ -54,11 +65,107 @@ function SocialButton({
   );
 }
 
+// ── Email / password tab ──────────────────────────────────────────────────────
+
+type EmailMode = "login" | "register" | "forgot";
+
+function EmailLoginTab({ onSuccess }: { onSuccess: (token: string) => void }) {
+  const [mode,     setMode]     = useState<EmailMode>("login");
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
+  const [name,     setName]     = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+  const [info,     setInfo]     = useState("");
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", padding: "9px 10px", marginBottom: 10,
+    background: "var(--surface2)", border: "1px solid var(--border)",
+    borderRadius: 4, color: "var(--text)", fontSize: 13,
+    fontFamily: "var(--font-mono)", outline: "none", boxSizing: "border-box",
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(""); setInfo("");
+    setLoading(true);
+    try {
+      if (mode === "login") {
+        const data = await localAuth("/auth/login", { email, password });
+        if (data.token) onSuccess(data.token);
+      } else if (mode === "register") {
+        const data = await localAuth("/auth/register", { email, password, name });
+        if (data.token) onSuccess(data.token);
+      } else {
+        await localAuth("/auth/forgot-password", { email });
+        setInfo("If an account exists, a reset link has been sent.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit}>
+      {error && <div className="auth-error" style={{ marginBottom: 12 }}>{error}</div>}
+      {info  && <div style={{ padding: "8px 12px", background: "rgba(100,220,100,0.08)", border: "1px solid rgba(100,220,100,0.2)",
+        borderRadius: 4, color: "#7ddf7d", fontSize: 12, marginBottom: 12 }}>{info}</div>}
+
+      {mode === "register" && (
+        <input required value={name} onChange={e => setName(e.target.value)}
+          style={inputStyle} placeholder="Full name" />
+      )}
+
+      <input required type="email" value={email} onChange={e => setEmail(e.target.value)}
+        style={inputStyle} placeholder="Email address" />
+
+      {mode !== "forgot" && (
+        <input required type="password" value={password} onChange={e => setPassword(e.target.value)}
+          style={inputStyle} placeholder="Password" />
+      )}
+
+      <button
+        type="submit" disabled={loading}
+        style={{ width: "100%", padding: "10px", background: "var(--accent)", border: "none",
+          borderRadius: 4, color: "#fff", cursor: loading ? "not-allowed" : "pointer",
+          fontSize: 13, opacity: loading ? 0.6 : 1, marginBottom: 10 }}
+      >
+        {loading ? "…" : mode === "login" ? "Sign in" : mode === "register" ? "Create account" : "Send reset link"}
+      </button>
+
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)" }}>
+        {mode === "login" ? (
+          <>
+            <button type="button" onClick={() => { setMode("register"); setError(""); setInfo(""); }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 11, padding: 0 }}>
+              Create account
+            </button>
+            <button type="button" onClick={() => { setMode("forgot"); setError(""); setInfo(""); }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 11, padding: 0 }}>
+              Forgot password?
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={() => { setMode("login"); setError(""); setInfo(""); }}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 11, padding: 0 }}>
+            ← Back to sign in
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
+type Tab = "social" | "email";
+
 export function AuthForm() {
-  const router  = useRouter();
-  const [error,  setError]  = useState("");
+  const router   = useRouter();
+  const [tab,     setTab]    = useState<Tab>("social");
+  const [error,   setError]  = useState("");
   const [loading, setLoading] = useState<string | null>(null);
 
   const handleProvider = async (
@@ -79,6 +186,18 @@ export function AuthForm() {
     }
   };
 
+  const handleEmailSuccess = (token: string) => {
+    setSession(token);
+    router.push("/dashboard");
+  };
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    flex: 1, padding: "7px 0", background: active ? "var(--surface2)" : "transparent",
+    border: "none", borderRadius: 4, cursor: "pointer",
+    color: active ? "var(--text)" : "var(--muted)", fontSize: 12,
+    fontFamily: "var(--font-mono)", transition: "all 0.15s",
+  });
+
   return (
     <div className="auth-shell">
       <div className="auth-card">
@@ -89,25 +208,42 @@ export function AuthForm() {
           One key. All LLMs. Automatic fallback.
         </div>
 
+        {/* Tab switcher */}
+        <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface3, var(--surface))",
+          border: "1px solid var(--border)", borderRadius: 6, marginBottom: 20 }}>
+          <button style={tabStyle(tab === "social")} onClick={() => { setTab("social"); setError(""); }}>
+            Social sign-in
+          </button>
+          <button style={tabStyle(tab === "email")} onClick={() => { setTab("email"); setError(""); }}>
+            Email &amp; password
+          </button>
+        </div>
+
         {error && <div className="auth-error">{error}</div>}
 
-        <div style={{ marginBottom: 24 }}>
-          <SocialButton
-            icon={<GoogleIcon />} label="Google"
-            loading={loading === "google"}
-            onClick={() => handleProvider("google", signInWithGoogle)}
-          />
-          <SocialButton
-            icon={<GithubIcon />} label="GitHub"
-            loading={loading === "github"}
-            onClick={() => handleProvider("github", signInWithGithub)}
-          />
-          <SocialButton
-            icon={<AppleIcon />} label="Apple"
-            loading={loading === "apple"}
-            onClick={() => handleProvider("apple", signInWithApple)}
-          />
-        </div>
+        {tab === "social" ? (
+          <div style={{ marginBottom: 24 }}>
+            <SocialButton
+              icon={<GoogleIcon />} label="Google"
+              loading={loading === "google"}
+              onClick={() => handleProvider("google", signInWithGoogle)}
+            />
+            <SocialButton
+              icon={<GithubIcon />} label="GitHub"
+              loading={loading === "github"}
+              onClick={() => handleProvider("github", signInWithGithub)}
+            />
+            <SocialButton
+              icon={<AppleIcon />} label="Apple"
+              loading={loading === "apple"}
+              onClick={() => handleProvider("apple", signInWithApple)}
+            />
+          </div>
+        ) : (
+          <div style={{ marginBottom: 24 }}>
+            <EmailLoginTab onSuccess={handleEmailSuccess} />
+          </div>
+        )}
 
         <div style={{ fontSize: 10, color: "var(--muted2)", textAlign: "center", lineHeight: 1.6 }}>
           By signing in you agree to our{" "}

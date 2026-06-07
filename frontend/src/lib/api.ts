@@ -57,8 +57,10 @@ export interface BillingLimits {
 export interface BillingMe {
   plan: "FREE" | "PRO" | "ENTERPRISE";
   payAsYouGo: boolean;
+  useManaged: boolean;
   limits: BillingLimits;
   usage: { requests: number; month: string };
+  managedUsage: { tokensUsed: number; costUsd: number };
   nextResetAt: string;
   subscription: {
     status: string;
@@ -76,6 +78,8 @@ export const billingApi = {
     request<{ url: string }>("/billing/portal", { method: "POST" }, token),
   togglePayg: (token: string, enabled: boolean) =>
     request<{ payAsYouGo: boolean }>("/billing/payg", { method: "POST", body: JSON.stringify({ enabled }) }, token),
+  toggleManaged: (token: string, enabled: boolean) =>
+    request<{ useManaged: boolean }>("/billing/managed", { method: "POST", body: JSON.stringify({ enabled }) }, token),
 };
 
 // ── API Keys ─────────────────────────────────────────────────────────────────

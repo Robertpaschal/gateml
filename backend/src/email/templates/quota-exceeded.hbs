@@ -1,0 +1,16 @@
+<h1>Monthly quota reached</h1>
+<p>Hi {{name}},</p>
+<p>Your <strong>{{plan}}</strong> quota of <strong>{{limit}} requests</strong> is exhausted for this month.</p>
+
+<div class="highlight">
+  <p style="margin:0;font-size:14px;color:#fca5a5;">✗ &nbsp;Live gateway calls are currently returning <span class="code">402 quota_exceeded</span>.</p>
+</div>
+
+<p>Your options:</p>
+<p>1. &nbsp;<a href="{{billingUrl}}" style="color:#a78bfa;">Upgrade to Pro</a> — 30,000 requests/month</p>
+<p>2. &nbsp;<a href="{{billingUrl}}" style="color:#a78bfa;">Enable pay-as-you-go</a> — $0.001/req overage</p>
+<p>3. &nbsp;Wait for quota reset on the 1st of next month</p>
+
+<p style="text-align:center;margin:24px 0;">
+  <a class="btn" href="{{billingUrl}}">Manage Billing</a>
+</p>

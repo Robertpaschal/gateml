@@ -21,6 +21,11 @@ class TogglePaygDto {
   enabled!: boolean;
 }
 
+class ToggleManagedDto {
+  @IsBoolean()
+  enabled!: boolean;
+}
+
 @ApiTags('billing')
 @Controller('billing')
 export class BillingController {
@@ -32,7 +37,7 @@ export class BillingController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('jwt')
-  @ApiOperation({ summary: 'Get current plan and usage' })
+  @ApiOperation({ summary: 'Get current plan, usage, and managed-mode status' })
   me(@CurrentUser() user: User) {
     return this.billing.getMe(user.id);
   }
@@ -76,5 +81,13 @@ export class BillingController {
   @ApiOperation({ summary: 'Toggle pay-as-you-go for over-quota requests' })
   togglePayg(@CurrentUser() user: User, @Body() body: TogglePaygDto) {
     return this.billing.togglePayAsYouGo(user.id, body.enabled);
+  }
+
+  @Post('managed')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('jwt')
+  @ApiOperation({ summary: 'Toggle GateML Managed Keys — use GateML provider keys instead of BYOK' })
+  toggleManaged(@CurrentUser() user: User, @Body() body: ToggleManagedDto) {
+    return this.billing.toggleManaged(user.id, body.enabled);
   }
 }

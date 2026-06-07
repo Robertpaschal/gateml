@@ -6,7 +6,6 @@ import { Plan }            from '@prisma/client';
 import { PLAN_LIMITS, PlanKey } from './plan-limits';
 import StripeLib from 'stripe';
 
-// Alias so we can use it both as a value (new StripeLib()) and type (InstanceType)
 type StripeClient = InstanceType<typeof StripeLib>;
 
 function currentMonth(): string {
@@ -40,29 +39,30 @@ export class BillingService {
     return { requests: record?.requests ?? 0, month };
   }
 
-  /** Throws 402 if over quota with no PAYG. Fires warning emails at 80% and 100%. */
-  async checkQuota(userId: string): Promise<void> {
+  /**
+   * Throws 402 if over quota with no PAYG.
+   * Returns the user's managed-mode flag so callers avoid a second DB hit.
+   */
+  async checkQuota(userId: string): Promise<{ useManaged: boolean }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
 
     const lim = this.limits(user.plan).liveRequestsPerMonth;
-    if (lim === -1) return; // unlimited (Enterprise)
+    if (lim === -1) return { useManaged: user.useManaged }; // unlimited (Enterprise)
 
     const { requests } = await this.getUsage(userId);
 
-    // Fire quota warning at 80% (once — only at the exact threshold request)
     if (requests === Math.floor(lim * 0.8)) {
-      this.email.sendQuotaWarning(user.email, user.name, requests, lim).catch(() => undefined);
+      this.email.sendQuotaWarning(user.email, user.name, requests, lim, user.plan);
     }
 
-    if (requests < lim) return;
+    if (requests < lim) return { useManaged: user.useManaged };
 
-    // Fire quota-exceeded email at 100% (once)
     if (requests === lim) {
-      this.email.sendQuotaExceeded(user.email, user.name).catch(() => undefined);
+      this.email.sendQuotaExceeded(user.email, user.name, lim, user.plan);
     }
 
-    if (user.payAsYouGo) return;
+    if (user.payAsYouGo) return { useManaged: user.useManaged };
 
     throw new HttpException(
       {
@@ -87,6 +87,16 @@ export class BillingService {
     });
   }
 
+  /** Accumulate token usage + cost for managed-key calls (called after each successful managed request). */
+  async incrementManagedUsage(userId: string, tokens: number, costUsd: number): Promise<void> {
+    const month = currentMonth();
+    await this.prisma.usageRecord.upsert({
+      where:  { userId_month: { userId, month } },
+      update: { tokensUsed: { increment: tokens }, managedCostUsd: { increment: costUsd }, updatedAt: new Date() },
+      create: { userId, month, requests: 0, tokensUsed: tokens, managedCostUsd: costUsd, updatedAt: new Date() },
+    });
+  }
+
   // ── Plan info ─────────────────────────────────────────────────────────────
 
   async getMe(userId: string) {
@@ -98,7 +108,12 @@ export class BillingService {
 
     const plan    = user.plan as PlanKey;
     const lim     = this.limits(user.plan);
-    const { requests, month } = await this.getUsage(userId);
+    const month   = currentMonth();
+    const record  = await this.prisma.usageRecord.findUnique({
+      where: { userId_month: { userId, month } },
+    });
+
+    const requests = record?.requests ?? 0;
 
     const monthStart = new Date(`${month}-01T00:00:00Z`);
     const nextReset  = new Date(monthStart);
@@ -107,8 +122,13 @@ export class BillingService {
     return {
       plan,
       payAsYouGo:   user.payAsYouGo,
+      useManaged:   user.useManaged,
       limits:       lim,
       usage:        { requests, month },
+      managedUsage: {
+        tokensUsed:    record?.tokensUsed     ?? 0,
+        costUsd:       record?.managedCostUsd ?? 0,
+      },
       nextResetAt:  nextReset,
       subscription: user.subscription
         ? {
@@ -209,7 +229,7 @@ export class BillingService {
     await this.prisma.user.update({ where: { id: userId }, data: { plan } });
 
     if (prevUser && prevUser.plan !== plan && isActive) {
-      this.email.sendPlanUpgraded(prevUser.email, prevUser.name, plan).catch(() => undefined);
+      this.email.sendPlanUpgraded(prevUser.email, prevUser.name, plan);
     }
 
     await this.prisma.subscription.upsert({
@@ -231,6 +251,14 @@ export class BillingService {
       where:  { id: userId },
       data:   { payAsYouGo: enabled },
       select: { payAsYouGo: true },
+    });
+  }
+
+  async toggleManaged(userId: string, enabled: boolean) {
+    return this.prisma.user.update({
+      where:  { id: userId },
+      data:   { useManaged: enabled },
+      select: { useManaged: true },
     });
   }
 }

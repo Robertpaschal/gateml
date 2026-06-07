@@ -1,0 +1,13 @@
+<h1>You've used {{pct}}% of your quota</h1>
+<p>Hi {{name}},</p>
+<p>You've used <strong>{{used}} of {{limit}} requests</strong> ({{pct}}%) this month on the <span class="badge badge-purple">{{plan}}</span> plan.</p>
+
+<div class="highlight">
+  <p style="margin:0;font-size:14px;color:#fde68a;">⚠ &nbsp;At 100% usage, live gateway calls will be blocked until your quota resets or you upgrade.</p>
+</div>
+
+<p style="text-align:center;margin:24px 0;">
+  <a class="btn" href="{{billingUrl}}">Upgrade to Pro</a>
+</p>
+
+<p style="font-size:13px;color:#555;">Pro includes 30× more requests, 5 API key pairs, and 90-day log retention.</p>

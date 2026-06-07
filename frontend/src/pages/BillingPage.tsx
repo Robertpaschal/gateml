@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { billingApi } from "../lib/api";
 import { useToken }   from "../hooks/useToken";
 import type { BillingMe } from "../lib/api";
+import Link from "next/link";
 
 const PRICE_IDS = {
   PRO_MONTHLY: process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY ?? "",
@@ -16,6 +17,12 @@ function pct(used: number, limit: number) {
 }
 
 function fmt(n: number) { return n === -1 ? "Unlimited" : n.toLocaleString(); }
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
 
 export function BillingPage() {
   const token        = useToken();
@@ -79,6 +86,7 @@ export function BillingPage() {
   const isPro  = data.plan === "PRO";
   const isEnt  = data.plan === "ENTERPRISE";
   const nextReset = new Date(data.nextResetAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const hasManagedUsage = data.useManaged || (data.managedUsage?.tokensUsed ?? 0) > 0;
 
   return (
     <div className="fade-in" style={{ maxWidth: 720 }}>
@@ -100,10 +108,19 @@ export function BillingPage() {
             <div className="card-title">Current plan</div>
             <div className="card-sub">Resets on {nextReset}</div>
           </div>
-          <PlanBadge plan={data.plan} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {data.useManaged && (
+              <span style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                background: "rgba(0,201,255,0.12)", color: "var(--accent2)",
+                border: "1px solid rgba(0,201,255,0.25)", borderRadius: 4, padding: "2px 7px",
+              }}>MANAGED</span>
+            )}
+            <PlanBadge plan={data.plan} />
+          </div>
         </div>
 
-        {/* Usage meter */}
+        {/* Request usage meter */}
         {!isEnt && (
           <div style={{ marginTop: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
@@ -154,6 +171,88 @@ export function BillingPage() {
         )}
       </div>
 
+      {/* Managed Keys usage card — shown when managed mode is on or there's usage this month */}
+      {hasManagedUsage && (
+        <div className="card" style={{
+          marginBottom: 20,
+          borderColor: "rgba(0,201,255,0.3)",
+          background: "rgba(0,201,255,0.03)",
+        }}>
+          <div className="card-header">
+            <div>
+              <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                GateML Managed Keys
+                <span style={{
+                  fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                  background: "rgba(0,201,255,0.12)", color: "var(--accent2)",
+                  border: "1px solid rgba(0,201,255,0.25)", borderRadius: 4, padding: "1px 6px",
+                }}>{data.useManaged ? "ACTIVE" : "INACTIVE"}</span>
+              </div>
+              <div className="card-sub">Token-based billing at provider cost + 20% markup</div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
+            <div style={{ padding: "10px 12px", background: "var(--surface2)", borderRadius: 6 }}>
+              <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Tokens used</div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-ui)", color: "var(--accent2)" }}>
+                {fmtTokens(data.managedUsage?.tokensUsed ?? 0)}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--muted2)" }}>this month</div>
+            </div>
+            <div style={{ padding: "10px 12px", background: "var(--surface2)", borderRadius: 6 }}>
+              <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Accrued cost</div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-ui)", color: "var(--text)" }}>
+                ${(data.managedUsage?.costUsd ?? 0).toFixed(4)}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--muted2)" }}>this month</div>
+            </div>
+            <div style={{ padding: "10px 12px", background: "var(--surface2)", borderRadius: 6 }}>
+              <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Status</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: data.useManaged ? "var(--accent2)" : "var(--muted)" }}>
+                {data.useManaged ? "Enabled" : "Disabled"}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--muted2)" }}>
+                <Link href="/dashboard/gateway" style={{ color: "var(--accent2)", textDecoration: "none" }}>
+                  {data.useManaged ? "Manage in Gateway" : "Enable in Gateway"}
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 10, color: "var(--muted2)", lineHeight: 1.6 }}>
+            Managed key usage is billed separately from your plan quota. BYOK keys always take priority — managed keys are used only when no provider key is configured for that provider.
+          </div>
+        </div>
+      )}
+
+      {/* Managed mode prompt — shown when managed is off and no usage yet */}
+      {!hasManagedUsage && (
+        <div style={{
+          marginBottom: 20, padding: "14px 16px",
+          background: "rgba(0,201,255,0.03)",
+          border: "1px solid rgba(0,201,255,0.12)",
+          borderRadius: 8, display: "flex", alignItems: "center", gap: 14,
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--accent2)", marginBottom: 3 }}>GateML Managed Keys</div>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>
+              Skip provider key setup entirely. Enable in Gateway → Provider Keys to route through GateML&apos;s keys at cost + 20% markup.
+            </div>
+          </div>
+          <Link
+            href="/dashboard/gateway"
+            style={{
+              padding: "7px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+              background: "rgba(0,201,255,0.1)", color: "var(--accent2)",
+              border: "1px solid rgba(0,201,255,0.25)", textDecoration: "none", whiteSpace: "nowrap",
+            }}
+          >
+            Enable now
+          </Link>
+        </div>
+      )}
+
       {/* Upgrade section — hidden for Pro/Enterprise */}
       {!isPro && !isEnt && (
         <div className="card" style={{ marginBottom: 20 }}>
@@ -161,7 +260,6 @@ export function BillingPage() {
             <div className="card-title">Upgrade to Pro</div>
           </div>
 
-          {/* Billing toggle */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0" }}>
             <span style={{ fontSize: 12, color: annual ? "var(--muted)" : "var(--text)" }}>Monthly</span>
             <button
@@ -185,15 +283,16 @@ export function BillingPage() {
           </div>
 
           <FeatureList features={[
-            ["30,000 live requests / month",     true],
-            ["Full observability + cost tracking", true],
-            ["Prompt versioning",                 true],
-            ["Eval testing suite",                true],
-            ["Fallback chain configuration",      true],
-            ["Up to 5 API key pairs",             true],
-            ["90-day log retention",              true],
-            ["Pay-as-you-go overages",            true],
-            ["Email support",                     true],
+            ["30,000 live requests / month",        true],
+            ["Full observability + cost tracking",   true],
+            ["GateML Managed Keys (no setup)",       true],
+            ["Prompt versioning",                    true],
+            ["Eval testing suite",                   true],
+            ["Fallback chain configuration",         true],
+            ["Up to 5 API key pairs",                true],
+            ["90-day log retention",                 true],
+            ["Pay-as-you-go overages",               true],
+            ["Email support",                        true],
           ]} />
 
           <button
@@ -227,20 +326,21 @@ export function BillingPage() {
           </thead>
           <tbody>
             {[
-              ["Live requests / month",   "1,000",     "30,000"],
-              ["Test requests",           "Unlimited", "Unlimited"],
-              ["API key pairs",           "1",         "5"],
-              ["Log retention",           "7 days",    "90 days"],
-              ["Prompts",                 "1",         "Unlimited"],
-              ["Prompt versioning",       "✗",         "✓"],
-              ["Fallback chain",          "✗",         "✓"],
-              ["Eval testing",            "✗",         "✓"],
-              ["Pay-as-you-go",           "$0.002/req","$0.001/req"],
+              ["Live requests / month",       "1,000",      "30,000"],
+              ["Test requests",               "Unlimited",  "Unlimited"],
+              ["GateML Managed Keys",         "✓",          "✓"],
+              ["API key pairs",               "1",          "5"],
+              ["Log retention",               "7 days",     "90 days"],
+              ["Prompts",                     "1",          "Unlimited"],
+              ["Prompt versioning",           "✗",          "✓"],
+              ["Fallback chain",              "✗",          "✓"],
+              ["Eval testing",                "✗",          "✓"],
+              ["Pay-as-you-go",               "$0.002/req", "$0.001/req"],
             ].map(([label, free, pro]) => (
               <tr key={label}>
                 <td>{label}</td>
-                <td style={{ color: free === "✗" ? "var(--muted2)" : "var(--text)" }}>{free}</td>
-                <td style={{ color: pro  === "✗" ? "var(--muted2)" : "var(--accent)" }}>{pro}</td>
+                <td style={{ color: free === "✗" ? "var(--muted2)" : free === "✓" ? "var(--accent2)" : "var(--text)" }}>{free}</td>
+                <td style={{ color: pro  === "✗" ? "var(--muted2)" : pro  === "✓" ? "var(--accent2)" : "var(--accent)" }}>{pro}</td>
               </tr>
             ))}
           </tbody>

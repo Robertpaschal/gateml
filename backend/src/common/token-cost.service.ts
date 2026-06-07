@@ -22,9 +22,12 @@ const CONTEXT_WINDOWS: Record<string, number> = {
   'gemini-1.5-pro':    1_048_576,
   'gemini-1.5-flash':  1_048_576,
   'claude-opus-4-8':   200_000,
-  'claude-sonnet-4-6': 200_000,
+  'claude-sonnet-4-6':200_000,
   'claude-haiku-4-5':  200_000,
 };
+
+// GateML charges provider cost + this markup when using managed keys
+const MANAGED_MARKUP = 0.20;
 
 @Injectable()
 export class TokenCostService {
@@ -41,13 +44,26 @@ export class TokenCostService {
     return (promptTokens / 1_000_000) * p.input + (completionTokens / 1_000_000) * p.output;
   }
 
+  /** Cost billed to user when GateML managed keys are used (provider cost + markup). */
+  calculateManaged(model: string, promptTokens: number, completionTokens: number): number {
+    return this.calculate(model, promptTokens, completionTokens) * (1 + MANAGED_MARKUP);
+  }
+
   getSupportedModels() {
     return Object.entries(PRICING).map(([id, pricing]) => ({
       id,
-      object: 'model',
-      provider: this.getProvider(id),
+      object:         'model',
+      provider:       this.getProvider(id),
       context_window: CONTEXT_WINDOWS[id] ?? 128_000,
       pricing_per_1m: pricing,
+      managed_pricing_per_1m: {
+        input:  parseFloat((pricing.input  * (1 + MANAGED_MARKUP)).toFixed(4)),
+        output: parseFloat((pricing.output * (1 + MANAGED_MARKUP)).toFixed(4)),
+      },
     }));
+  }
+
+  getManagedMarkup(): number {
+    return MANAGED_MARKUP;
   }
 }

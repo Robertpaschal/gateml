@@ -1,0 +1,22 @@
+<h1>You're now on {{plan}} 🎉</h1>
+<p>Hi {{name}},</p>
+<p>Your GateML plan has been upgraded to <span class="badge badge-green">{{plan}}</span>. Your new limits are active immediately.</p>
+
+<div class="highlight">
+  <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#e5e5e5;">What's unlocked:</p>
+  {{#if isPro}}
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;30,000 requests / month</p>
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;5 API key pairs</p>
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;90-day log retention</p>
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;Priority support</p>
+  {{else}}
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;Unlimited requests</p>
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;Unlimited API key pairs</p>
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;365-day log retention</p>
+  <p style="margin:2px 0;font-size:14px;color:#86efac;">✓ &nbsp;Dedicated support</p>
+  {{/if}}
+</div>
+
+<p style="text-align:center;margin:24px 0;">
+  <a class="btn" href="{{dashboardUrl}}">Go to Dashboard</a>
+</p>

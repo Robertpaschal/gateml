@@ -7,6 +7,21 @@
 
 services:
 
+  # ── Redis (email queue + caching) ───────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redisdata:/data
+
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
@@ -36,6 +51,7 @@ services:
     env_file: ./backend/.env
     environment:
       DATABASE_URL:        postgresql://gateml:gateml@db:5432/gateml   # Overrides .env — uses Docker service name
+      REDIS_URL:           redis://redis:6379
       NODE_ENV:            development
       FRONTEND_URL:        http://localhost:3000    # Browser-side origin for CORS
       ADMIN_FRONTEND_URL:  http://localhost:3002    # Admin panel origin for CORS
@@ -45,6 +61,8 @@ services:
       - "3001:3001"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # ── Next.js Frontend (consumer) ─────────────────────────────────────────────
@@ -97,3 +115,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

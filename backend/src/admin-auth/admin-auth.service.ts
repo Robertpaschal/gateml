@@ -109,6 +109,8 @@ export class AdminAuthService {
     if (admin.inviteExpiry && admin.inviteExpiry < new Date())     throw new BadRequestException('Invitation has expired. Ask for a new one.');
     if (admin.passwordHash)                                        throw new BadRequestException('This invitation has already been accepted.');
 
+    if (password.length < 12) throw new BadRequestException('Password must be at least 12 characters.');
+
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     const updated = await this.prisma.adminUser.update({
       where: { id: admin.id },
@@ -116,6 +118,25 @@ export class AdminAuthService {
     });
 
     return { token: this.signToken(updated), admin: this.publicAdmin(updated) };
+  }
+
+  async changePassword(adminId: string, currentPassword: string, newPassword: string) {
+    const admin = await this.prisma.adminUser.findUnique({ where: { id: adminId } });
+    if (!admin || !admin.passwordHash) throw new UnauthorizedException('Account not found.');
+
+    const ok = await bcrypt.compare(currentPassword, admin.passwordHash);
+    if (!ok) throw new UnauthorizedException('Current password is incorrect.');
+
+    if (newPassword.length < 12) throw new BadRequestException('New password must be at least 12 characters.');
+
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    // Increment tokenVersion to invalidate all other sessions
+    await this.prisma.adminUser.update({
+      where: { id: adminId },
+      data:  { passwordHash, tokenVersion: { increment: 1 } },
+    });
+
+    return { message: 'Password changed. All other sessions have been invalidated.' };
   }
 
   // ── Deactivate ─────────────────────────────────────────────────────────────
@@ -128,8 +149,12 @@ export class AdminAuthService {
     const target = await this.prisma.adminUser.findUnique({ where: { id: targetId } });
     if (!target) throw new NotFoundException('Admin not found.');
 
-    await this.prisma.adminUser.update({ where: { id: targetId }, data: { isActive: false } });
-    return { message: `Admin ${target.email} deactivated.` };
+    // Increment tokenVersion to immediately invalidate all existing JWTs
+    await this.prisma.adminUser.update({
+      where: { id: targetId },
+      data:  { isActive: false, tokenVersion: { increment: 1 } },
+    });
+    return { message: `Admin ${target.email} deactivated. All active sessions invalidated.` };
   }
 
   async reactivate(requesterId: string, targetId: string) {
@@ -217,18 +242,22 @@ export class AdminAuthService {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  async validatePayload(payload: { sub: string; isAdmin: boolean }) {
+  async validatePayload(payload: { sub: string; isAdmin: boolean; tv?: number }) {
     if (!payload.isAdmin) throw new UnauthorizedException('Not an admin token.');
     const admin = await this.prisma.adminUser.findUnique({ where: { id: payload.sub } });
-    if (!admin)         throw new UnauthorizedException('Admin not found.');
+    if (!admin)          throw new UnauthorizedException('Admin not found.');
     if (!admin.isActive) throw new ForbiddenException('Account deactivated.');
+    // tokenVersion mismatch means the token was issued before a password change or deactivation
+    if (payload.tv !== undefined && payload.tv !== admin.tokenVersion) {
+      throw new UnauthorizedException('Session invalidated. Please log in again.');
+    }
     return admin;
   }
 
-  private signToken(admin: { id: string; email: string; role: string }) {
+  private signToken(admin: { id: string; email: string; role: string; tokenVersion: number }) {
     const secret = this.config.get<string>('ADMIN_JWT_SECRET') ?? this.config.get<string>('JWT_SECRET')!;
     return this.jwt.sign(
-      { sub: admin.id, email: admin.email, role: admin.role, isAdmin: true },
+      { sub: admin.id, email: admin.email, role: admin.role, isAdmin: true, tv: admin.tokenVersion },
       { secret },
     );
   }

@@ -1,7 +1,8 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { ConfigService }   from '@nestjs/config';
 import { PrismaService }   from '../prisma/prisma.service';
 import { EmailService }    from '../email/email.service';
+import { PdfService }      from '../pdf/pdf.service';
 import { Plan }            from '@prisma/client';
 import { PLAN_LIMITS, PlanKey } from './plan-limits';
 import StripeLib from 'stripe';
@@ -9,17 +10,20 @@ import StripeLib from 'stripe';
 type StripeClient = InstanceType<typeof StripeLib>;
 
 function currentMonth(): string {
+  // helper — defined before class to avoid hoisting issues
   return new Date().toISOString().slice(0, 7); // "2026-06"
 }
 
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
   private stripe: StripeClient | null = null;
 
   constructor(
     private readonly prisma:  PrismaService,
     private readonly config:  ConfigService,
     private readonly email:   EmailService,
+    private readonly pdf:     PdfService,
   ) {
     const key = this.config.get<string>('STRIPE_SECRET_KEY');
     if (key) this.stripe = new StripeLib(key, { apiVersion: '2026-05-27.dahlia' });
@@ -210,6 +214,61 @@ export class BillingService {
       case 'customer.subscription.deleted':
         await this.cancelSubscription(obj.id as string);
         break;
+      case 'invoice.payment_succeeded':
+        await this.handleInvoicePaid(obj);
+        break;
+    }
+  }
+
+  private async handleInvoicePaid(invoice: Record<string, unknown>) {
+    const customerId = invoice['customer'] as string;
+    if (!customerId) return;
+
+    const user = await this.prisma.user.findFirst({ where: { stripeCustomerId: customerId } });
+    if (!user) return;
+
+    const amountCents = (invoice['amount_paid'] as number) ?? 0;
+    const currency    = (invoice['currency']    as string) ?? 'usd';
+    const invoiceId   = (invoice['id']          as string) ?? 'N/A';
+    const periodStart = new Date(((invoice['period_start'] as number) ?? 0) * 1000);
+    const periodEnd   = new Date(((invoice['period_end']   as number) ?? 0) * 1000);
+
+    try {
+      const pdfBuffer = await this.pdf.generateInvoice({
+        invoiceId,
+        customerName:  user.name ?? user.email,
+        customerEmail: user.email,
+        plan:          user.plan,
+        amount:        amountCents,
+        currency,
+        periodStart,
+        periodEnd,
+        issuedAt:      new Date(),
+      });
+
+      this.email.sendInvoice(
+        user.email,
+        user.name,
+        {
+          invoiceId,
+          plan:        user.plan,
+          amount:      `$${(amountCents / 100).toFixed(2)} ${currency.toUpperCase()}`,
+          periodStart: periodStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          periodEnd:   periodEnd.toLocaleDateString('en-US',   { month: 'short', day: 'numeric', year: 'numeric' }),
+          date:        new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+        },
+        pdfBuffer,
+      );
+    } catch (err) {
+      this.logger.warn(`Invoice PDF generation failed for user ${user.id}: ${err}`);
+      // Still send invoice email without PDF
+      this.email.sendInvoice(user.email, user.name, {
+        invoiceId, plan: user.plan,
+        amount:      `$${(amountCents / 100).toFixed(2)} ${currency.toUpperCase()}`,
+        periodStart: periodStart.toLocaleDateString(),
+        periodEnd:   periodEnd.toLocaleDateString(),
+        date:        new Date().toLocaleDateString(),
+      });
     }
   }
 

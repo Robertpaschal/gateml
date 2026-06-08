@@ -1,46 +1,147 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService }    from '@nestjs/config';
-import { EventEmitter2 }    from '@nestjs/event-emitter';
-import { OnEvent }          from '@nestjs/event-emitter';
-import * as Handlebars      from 'handlebars';
-import * as fs              from 'fs';
-import * as path            from 'path';
-import { EMAIL_SEND, EmailSendPayload } from './email.events';
+import { ConfigService }      from '@nestjs/config';
+import { InjectQueue }        from '@nestjs/bullmq';
+import { Queue }              from 'bullmq';
+import * as Handlebars        from 'handlebars';
+import * as fs                from 'fs';
+import * as path              from 'path';
+import { EMAIL_QUEUE, EMAIL_JOB, EmailJobData } from './email.queue';
 
 const TEMPLATE_DIR = path.join(__dirname, 'templates');
 const LAYOUT_PATH  = path.join(TEMPLATE_DIR, 'layouts', 'base.hbs');
-const MAX_RETRIES  = 3;
+
+// ── Transport abstraction ─────────────────────────────────────────────────────
+
+interface EmailTransport {
+  send(from: string, to: string, subject: string, html: string, attachments?: Attachment[]): Promise<void>;
+}
+
+interface Attachment {
+  filename:    string;
+  content:     Buffer;
+  contentType: string;
+}
+
+class ResendTransport implements EmailTransport {
+  private resend: any;
+  constructor(apiKey: string) {
+    import('resend').then(({ Resend }) => { this.resend = new Resend(apiKey); });
+  }
+  async send(from: string, to: string, subject: string, html: string, attachments?: Attachment[]) {
+    const result = await this.resend.emails.send({
+      from, to, subject, html,
+      ...(attachments?.length ? { attachments: attachments.map(a => ({
+        filename: a.filename,
+        content:  a.content.toString('base64'),
+      })) } : {}),
+    });
+    if (result?.error) throw new Error(result.error.message);
+  }
+}
+
+class SesTransport implements EmailTransport {
+  private region: string;
+  constructor(region: string) { this.region = region; }
+
+  async send(from: string, to: string, subject: string, html: string, attachments?: Attachment[]) {
+    const { SESv2Client, SendEmailCommand } = await import('@aws-sdk/client-sesv2');
+    const ses = new SESv2Client({ region: this.region });
+
+    if (attachments?.length) {
+      // SESv2 supports raw MIME via Content.Raw.Data
+      const boundary = `----=_Part_${Date.now()}`;
+      const mime = [
+        `From: ${from}`,
+        `To: ${to}`,
+        `Subject: ${subject}`,
+        `MIME-Version: 1.0`,
+        `Content-Type: multipart/mixed; boundary="${boundary}"`,
+        '',
+        `--${boundary}`,
+        `Content-Type: text/html; charset=UTF-8`,
+        `Content-Transfer-Encoding: quoted-printable`,
+        '',
+        html,
+        '',
+        ...attachments.flatMap(a => [
+          `--${boundary}`,
+          `Content-Type: ${a.contentType}; name="${a.filename}"`,
+          `Content-Transfer-Encoding: base64`,
+          `Content-Disposition: attachment; filename="${a.filename}"`,
+          '',
+          a.content.toString('base64'),
+          '',
+        ]),
+        `--${boundary}--`,
+      ].join('\r\n');
+
+      await ses.send(new SendEmailCommand({ Content: { Raw: { Data: Buffer.from(mime) } } }));
+      return;
+    }
+
+    await ses.send(new SendEmailCommand({
+      FromEmailAddress: from,
+      Destination: { ToAddresses: [to] },
+      Content: {
+        Simple: {
+          Subject: { Data: subject, Charset: 'UTF-8' },
+          Body:    { Html: { Data: html, Charset: 'UTF-8' } },
+        },
+      },
+    }));
+  }
+}
+
+class ConsoleTransport implements EmailTransport {
+  private readonly logger = new Logger('EmailConsole');
+  async send(_from: string, to: string, subject: string, _html: string, attachments?: Attachment[]) {
+    this.logger.log(`[DEV EMAIL] To: ${to} | Subject: ${subject}${attachments?.length ? ` | Attachments: ${attachments.map(a => a.filename).join(', ')}` : ''}`);
+  }
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
-  private resend: { emails: { send: (p: object) => Promise<{ error?: { message: string } }> } } | null = null;
+  private transport: EmailTransport = new ConsoleTransport();
   private layoutTemplate: Handlebars.TemplateDelegate | null = null;
   private templateCache = new Map<string, Handlebars.TemplateDelegate>();
 
   constructor(
-    private readonly config:  ConfigService,
-    private readonly events:  EventEmitter2,
+    private readonly config: ConfigService,
+    @InjectQueue(EMAIL_QUEUE) private readonly queue: Queue<EmailJobData>,
   ) {}
 
   async onModuleInit() {
-    const key = this.config.get<string>('RESEND_API_KEY');
-    if (key) {
-      const { Resend } = await import('resend');
-      this.resend = new Resend(key) as unknown as typeof this.resend;
-      this.logger.log('Email service ready (Resend)');
-    } else {
-      this.logger.warn('RESEND_API_KEY not set — emails will be logged to console');
-    }
+    this.transport = this.buildTransport();
     this.loadLayout();
+    // Wire processor back-reference (avoids circular DI)
+    // The processor module will set emailService = this after construction
+  }
+
+  private buildTransport(): EmailTransport {
+    const provider = (this.config.get<string>('EMAIL_PROVIDER') ?? 'resend').toLowerCase();
+    if (provider === 'ses') {
+      const region = this.config.get<string>('AWS_REGION') ?? 'us-east-1';
+      this.logger.log(`Email transport: Amazon SES (${region})`);
+      return new SesTransport(region);
+    }
+    const resendKey = this.config.get<string>('RESEND_API_KEY');
+    if (resendKey) {
+      this.logger.log('Email transport: Resend');
+      return new ResendTransport(resendKey);
+    }
+    this.logger.warn('No email transport configured — emails logged to console only');
+    return new ConsoleTransport();
   }
 
   private loadLayout() {
     try {
       const src = fs.readFileSync(LAYOUT_PATH, 'utf8');
       this.layoutTemplate = Handlebars.compile(src);
-    } catch (e) {
-      this.logger.warn(`Email layout not found at ${LAYOUT_PATH} — falling back to plain HTML`);
+    } catch {
+      this.logger.warn(`Email layout not found at ${LAYOUT_PATH}`);
     }
   }
 
@@ -57,8 +158,7 @@ export class EmailService implements OnModuleInit {
     const bodyFn = this.getTemplate(name);
     const body   = bodyFn(context);
     if (!this.layoutTemplate) return body;
-
-    const baseCtx = {
+    return this.layoutTemplate({
       body,
       subject:  context['subject'] ?? '',
       appUrl:   this.appUrl,
@@ -66,55 +166,47 @@ export class EmailService implements OnModuleInit {
       docsUrl:  `${this.appUrl}/docs`,
       year:     new Date().getFullYear(),
       ...context,
-    };
-    return this.layoutTemplate(baseCtx);
+    });
   }
 
-  // ── Core send ──────────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────────
 
-  /** Fire-and-forget: enqueue via EventEmitter for async delivery with retry. */
-  enqueue(to: string, subject: string, template: string, context: Record<string, unknown>) {
-    this.events.emit(EMAIL_SEND, { to, subject, template, context, retries: 0 } as EmailSendPayload);
+  /** Enqueue a transactional email (rendered from Handlebars template). */
+  enqueue(
+    to: string,
+    subject: string,
+    template: string,
+    context: Record<string, unknown>,
+    attachments?: Attachment[],
+  ) {
+    this.queue
+      .add(EMAIL_JOB.SEND, { to, subject, template, context, attachments })
+      .catch(err => this.logger.error(`Failed to enqueue email to ${to}: ${err}`));
   }
 
-  @OnEvent(EMAIL_SEND, { async: true })
-  async handleEmailSend(payload: EmailSendPayload) {
-    const { to, subject, template, context, retries = 0 } = payload;
-    try {
-      const html = this.renderTemplate(template, { ...context, subject });
-      await this.deliverRaw(to, subject, html);
-    } catch (err) {
-      if (retries < MAX_RETRIES) {
-        const delay = 1000 * 2 ** retries; // 1s, 2s, 4s
-        this.logger.warn(`Email to ${to} failed (attempt ${retries + 1}), retrying in ${delay}ms: ${err}`);
-        setTimeout(
-          () => this.events.emit(EMAIL_SEND, { ...payload, retries: retries + 1 }),
-          delay,
-        );
-      } else {
-        this.logger.error(`Email to ${to} failed after ${MAX_RETRIES} attempts: ${err}`);
-      }
-    }
+  /** Called by the BullMQ processor — renders and delivers. */
+  async deliverRendered(
+    to: string,
+    subject: string,
+    template: string,
+    context: Record<string, unknown>,
+    attachments?: Attachment[],
+  ): Promise<void> {
+    const html = this.renderTemplate(template, { ...context, subject });
+    await this.deliverRaw(to, subject, html, attachments);
   }
 
-  /** Deliver immediately (used internally after template rendering). */
-  async deliverRaw(to: string, subject: string, html: string): Promise<void> {
-    if (!this.resend) {
-      this.logger.log(`[EMAIL DEV] To: ${to} | Subject: ${subject}`);
-      return;
-    }
-    const result = await this.resend.emails.send({ from: this.from, to, subject, html });
-    if ((result as any)?.error) {
-      throw new Error((result as any).error.message);
-    }
+  /** Deliver pre-rendered HTML directly (used for campaigns). */
+  async deliverRaw(to: string, subject: string, html: string, attachments?: Attachment[]): Promise<void> {
+    await this.transport.send(this.from, to, subject, html, attachments);
   }
 
-  // ── Getters ────────────────────────────────────────────────────────────────
+  // ── Getters ───────────────────────────────────────────────────────────────
 
-  private get from()     { return this.config.get<string>('EMAIL_FROM')         ?? 'GateML <noreply@gateml.com>'; }
-  private get appUrl()   { return this.config.get<string>('APP_URL')            ?? 'https://app.gateml.com'; }
-  private get adminUrl() { return this.config.get<string>('ADMIN_FRONTEND_URL') ?? 'https://admin.gateml.com'; }
-  private get adminEmail() { return this.config.get<string>('ADMIN_EMAIL')      ?? 'team@gateml.com'; }
+  private get from()       { return this.config.get<string>('EMAIL_FROM')         ?? 'GateML <noreply@gateml.com>'; }
+  private get appUrl()     { return this.config.get<string>('APP_URL')            ?? 'https://app.gateml.com'; }
+  private get adminUrl()   { return this.config.get<string>('ADMIN_FRONTEND_URL') ?? 'https://admin.gateml.com'; }
+  private get adminEmail() { return this.config.get<string>('ADMIN_EMAIL')        ?? 'team@gateml.com'; }
 
   // ── Transactional helpers ─────────────────────────────────────────────────
 
@@ -128,15 +220,13 @@ export class EmailService implements OnModuleInit {
 
   sendEmailVerification(to: string, name: string | null, verifyUrl: string) {
     this.enqueue(to, 'Verify your GateML email address', 'email-verification', {
-      name:      name ?? 'there',
-      verifyUrl,
+      name: name ?? 'there', verifyUrl,
     });
   }
 
   sendPasswordReset(to: string, name: string | null, resetUrl: string) {
     this.enqueue(to, 'Reset your GateML password', 'password-reset', {
-      name:     name ?? 'there',
-      resetUrl,
+      name: name ?? 'there', resetUrl,
     });
   }
 
@@ -170,8 +260,7 @@ export class EmailService implements OnModuleInit {
 
   sendSupportReply(to: string, name: string, subject: string, replyBody: string, messageId: string) {
     this.enqueue(to, `Re: ${subject}`, 'support-reply', {
-      name, subject, replyBody, messageId,
-      dashboardUrl: `${this.appUrl}/dashboard`,
+      name, subject, replyBody, messageId, dashboardUrl: `${this.appUrl}/dashboard`,
     });
   }
 
@@ -200,8 +289,41 @@ export class EmailService implements OnModuleInit {
   }
 
   sendAdminInvite(to: string, name: string, role: string, acceptUrl: string, inviterName: string) {
-    this.enqueue(to, 'You\'ve been invited to GateML Admin', 'admin-invite', {
+    this.enqueue(to, "You've been invited to GateML Admin", 'admin-invite', {
       name, role, acceptUrl, inviterName,
     });
+  }
+
+  /** Custom message from admin to a specific user. */
+  sendAdminCustomMessage(to: string, name: string, subject: string, body: string, adminName: string) {
+    this.enqueue(to, subject, 'admin-custom-message', {
+      name: name ?? 'there', subject, body, adminName,
+      dashboardUrl: `${this.appUrl}/dashboard`,
+    });
+  }
+
+  /** Payment invoice with optional PDF attachment. */
+  sendInvoice(
+    to: string,
+    name: string | null,
+    invoiceData: {
+      invoiceId:    string;
+      plan:         string;
+      amount:       string;
+      periodStart:  string;
+      periodEnd:    string;
+      date:         string;
+    },
+    pdfBuffer?: Buffer,
+  ) {
+    const context     = { name: name ?? 'there', ...invoiceData, billingUrl: `${this.appUrl}/dashboard/billing` };
+    const attachments = pdfBuffer
+      ? [{ filename: `invoice-${invoiceData.invoiceId}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }]
+      : undefined;
+    if (attachments) {
+      this.enqueue(to, `GateML Invoice — ${invoiceData.plan} Plan`, 'invoice', context, attachments);
+    } else {
+      this.enqueue(to, `GateML Invoice — ${invoiceData.plan} Plan`, 'invoice', context);
+    }
   }
 }

@@ -108,7 +108,7 @@ describe('AdminAuthService', () => {
       mockPrisma.adminUser.update.mockResolvedValue({
         id: 'a1', email: 'a@x.com', name: 'Admin', role: 'SUPPORT', isActive: true,
       });
-      const result = await service.acceptInvite('valid-token', 'pass1234');
+      const result = await service.acceptInvite('valid-token', 'securePass123!!');
       expect(result.token).toBe('admin-jwt');
     });
   });

@@ -1,9 +1,9 @@
 /// <reference types="jest" />
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService }       from '@nestjs/config';
-import { EventEmitter2 }       from '@nestjs/event-emitter';
+import { getQueueToken }       from '@nestjs/bullmq';
 import { EmailService }        from './email.service';
-import { EMAIL_SEND }          from './email.events';
+import { EMAIL_QUEUE }         from './email.queue';
 
 const mockConfig = { get: jest.fn((k: string, d?: unknown) => {
   const map: Record<string, string> = {
@@ -14,7 +14,7 @@ const mockConfig = { get: jest.fn((k: string, d?: unknown) => {
   return map[k] ?? d ?? null;
 })};
 
-const mockEmitter = { emit: jest.fn() };
+const mockQueue = { add: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
 describe('EmailService', () => {
   let service: EmailService;
@@ -24,18 +24,18 @@ describe('EmailService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EmailService,
-        { provide: ConfigService, useValue: mockConfig  },
-        { provide: EventEmitter2, useValue: mockEmitter },
+        { provide: ConfigService,              useValue: mockConfig },
+        { provide: getQueueToken(EMAIL_QUEUE), useValue: mockQueue  },
       ],
     }).compile();
     service = module.get<EmailService>(EmailService);
   });
 
   describe('enqueue', () => {
-    it('emits EMAIL_SEND event with correct payload', () => {
+    it('adds a job to the BullMQ queue', () => {
       service.enqueue('user@test.com', 'Test Subject', 'welcome', { name: 'Alice' });
-      expect(mockEmitter.emit).toHaveBeenCalledWith(
-        EMAIL_SEND,
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'send',
         expect.objectContaining({
           to:       'user@test.com',
           subject:  'Test Subject',
@@ -47,24 +47,29 @@ describe('EmailService', () => {
   });
 
   describe('sendWelcome', () => {
-    it('enqueues welcome email', () => {
+    it('enqueues welcome email with correct template', () => {
       const spy = jest.spyOn(service, 'enqueue');
       service.sendWelcome('u@test.com', 'Bob');
-      expect(spy).toHaveBeenCalledWith('u@test.com', expect.any(String), 'welcome', expect.objectContaining({ name: 'Bob' }));
+      expect(spy).toHaveBeenCalledWith(
+        'u@test.com', expect.any(String), 'welcome',
+        expect.objectContaining({ name: 'Bob' }),
+      );
     });
   });
 
   describe('sendEmailVerification', () => {
-    it('enqueues email-verification template', () => {
+    it('enqueues email-verification template with verify URL', () => {
       const spy = jest.spyOn(service, 'enqueue');
       service.sendEmailVerification('u@test.com', 'Alice', 'https://example.com/verify?token=abc');
-      expect(spy).toHaveBeenCalledWith('u@test.com', expect.any(String), 'email-verification',
-        expect.objectContaining({ verifyUrl: 'https://example.com/verify?token=abc' }));
+      expect(spy).toHaveBeenCalledWith(
+        'u@test.com', expect.any(String), 'email-verification',
+        expect.objectContaining({ verifyUrl: 'https://example.com/verify?token=abc' }),
+      );
     });
   });
 
   describe('notifyAdminNewMessage', () => {
-    it('sends to admin email with enterprise-lead category', () => {
+    it('routes enterprise lead with correct subject prefix and category label', () => {
       const spy = jest.spyOn(service, 'enqueue');
       service.notifyAdminNewMessage('lead@co.com', 'Bob Corp', 'Pricing', 'Hi', 'msg1', 'Corp Inc', 'ENTERPRISE_LEAD');
       expect(spy).toHaveBeenCalledWith(
@@ -76,19 +81,48 @@ describe('EmailService', () => {
     });
   });
 
-  describe('handleEmailSend — retry', () => {
-    it('retries on failure up to MAX_RETRIES times', async () => {
-      jest.useFakeTimers();
-      const deliverSpy = jest.spyOn(service as any, 'renderTemplate').mockImplementation(() => { throw new Error('render fail'); });
-      const emitSpy    = jest.spyOn(mockEmitter, 'emit');
+  describe('sendAdminCustomMessage', () => {
+    it('enqueues custom message to the user', () => {
+      const spy = jest.spyOn(service, 'enqueue');
+      service.sendAdminCustomMessage('u@test.com', 'Alice', 'Hello there', 'Welcome!', 'Admin Name');
+      expect(spy).toHaveBeenCalledWith(
+        'u@test.com',
+        'Hello there',
+        'admin-custom-message',
+        expect.objectContaining({ body: 'Welcome!', adminName: 'Admin Name' }),
+      );
+    });
+  });
 
-      await service.handleEmailSend({ to: 'x@x.com', subject: 'S', template: 'welcome', context: {}, retries: 0 });
+  describe('sendInvoice', () => {
+    it('enqueues invoice with PDF attachment when buffer provided', () => {
+      const spy    = jest.spyOn(service, 'enqueue');
+      const pdfBuf = Buffer.from('%PDF-1.4 test');
+      service.sendInvoice('u@test.com', 'Alice', {
+        invoiceId: 'inv_123', plan: 'PRO', amount: '$19.00 USD',
+        periodStart: 'Jun 1', periodEnd: 'Jun 30', date: 'Jun 1, 2026',
+      }, pdfBuf);
+      expect(spy).toHaveBeenCalledWith(
+        'u@test.com',
+        expect.stringContaining('PRO'),
+        'invoice',
+        expect.objectContaining({ invoiceId: 'inv_123' }),
+        expect.arrayContaining([
+          expect.objectContaining({ filename: 'invoice-inv_123.pdf', contentType: 'application/pdf' }),
+        ]),
+      );
+    });
 
-      // Advance timers to trigger the retry emit
-      jest.runAllTimers();
-      expect(emitSpy).toHaveBeenCalledWith(EMAIL_SEND, expect.objectContaining({ retries: 1 }));
-      jest.useRealTimers();
-      deliverSpy.mockRestore();
+    it('enqueues invoice without attachment when no buffer', () => {
+      const spy = jest.spyOn(service, 'enqueue');
+      service.sendInvoice('u@test.com', 'Alice', {
+        invoiceId: 'inv_456', plan: 'PRO', amount: '$19.00 USD',
+        periodStart: 'Jun 1', periodEnd: 'Jun 30', date: 'Jun 1, 2026',
+      });
+      expect(spy).toHaveBeenCalledWith(
+        'u@test.com', expect.any(String), 'invoice',
+        expect.objectContaining({ invoiceId: 'inv_456' }),
+      );
     });
   });
 });

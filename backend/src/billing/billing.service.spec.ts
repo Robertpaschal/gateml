@@ -4,6 +4,7 @@ import { ConfigService }           from '@nestjs/config';
 import { BillingService }          from './billing.service';
 import { PrismaService }           from '../prisma/prisma.service';
 import { EmailService }            from '../email/email.service';
+import { PdfService }              from '../pdf/pdf.service';
 import { TokenCostService }        from '../common/token-cost.service';
 import { PLAN_LIMITS }             from './plan-limits';
 
@@ -16,9 +17,10 @@ const mockPrisma = {
   user: { findUnique: jest.fn(), update: jest.fn() },
   subscription: { findUnique: jest.fn() },
 };
-const mockEmail  = { sendQuotaWarning: jest.fn(), sendQuotaExceeded: jest.fn() };
-const mockConfig = { get: jest.fn((k: string, d?: unknown) => d ?? null) };
+const mockEmail     = { sendQuotaWarning: jest.fn(), sendQuotaExceeded: jest.fn(), sendInvoice: jest.fn() };
+const mockConfig    = { get: jest.fn((k: string, d?: unknown) => d ?? null) };
 const mockTokenCost = { calculateManaged: jest.fn(), getManagedMarkup: jest.fn().mockReturnValue(0.2) };
+const mockPdf       = { generateInvoice: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4')) };
 
 describe('BillingService', () => {
   let service: BillingService;
@@ -32,6 +34,7 @@ describe('BillingService', () => {
         { provide: EmailService,      useValue: mockEmail     },
         { provide: ConfigService,     useValue: mockConfig    },
         { provide: TokenCostService,  useValue: mockTokenCost },
+        { provide: PdfService,        useValue: mockPdf       },
       ],
     }).compile();
     service = module.get<BillingService>(BillingService);

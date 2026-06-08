@@ -4,12 +4,23 @@ import Link from "next/link";
 import { clearAdminSession } from "@/lib/auth";
 
 const NAV = [
-  { href: "/dashboard",           label: "Overview",   icon: "◈" },
-  { href: "/dashboard/users",     label: "Users",      icon: "⊞" },
-  { href: "/dashboard/messages",  label: "Messages",   icon: "◻" },
-  { href: "/dashboard/changelog", label: "Changelog",  icon: "◷" },
-  { href: "/dashboard/system",    label: "Status",     icon: "◉" },
-];
+  { group: "Overview" },
+  { href: "/dashboard",              label: "Dashboard",    icon: "◈" },
+  { href: "/dashboard/accounting",   label: "Accounting",   icon: "◐" },
+  { group: "CRM" },
+  { href: "/dashboard/users",        label: "Users",        icon: "⊞" },
+  { href: "/dashboard/messages",     label: "Support",      icon: "◻" },
+  { href: "/dashboard/audit",        label: "Audit Log",    icon: "◫" },
+  { group: "Marketing" },
+  { href: "/dashboard/campaigns",    label: "Campaigns",    icon: "◧" },
+  { href: "/dashboard/promos",       label: "Promo Codes",  icon: "◩" },
+  { group: "System" },
+  { href: "/dashboard/changelog",    label: "Changelog",    icon: "◷" },
+  { href: "/dashboard/system",       label: "Status",       icon: "◉" },
+  { href: "/dashboard/admins",       label: "Admins",       icon: "◑" },
+] as const;
+
+type NavItem = { group: string } | { href: string; label: string; icon: string };
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -37,22 +48,32 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: "12px 8px" }}>
-          {NAV.map(({ href, label, icon }) => {
-            const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+        <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
+          {(NAV as readonly NavItem[]).map((item, i) => {
+            if ("group" in item) {
+              return (
+                <div key={`g-${i}`} style={{
+                  fontSize: 9, color: "var(--muted2, #555)", textTransform: "uppercase",
+                  letterSpacing: "0.1em", padding: "10px 10px 4px", marginTop: i === 0 ? 0 : 6,
+                }}>
+                  {item.group}
+                </div>
+              );
+            }
+            const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
             return (
               <Link
-                key={href} href={href}
+                key={item.href} href={item.href}
                 style={{
                   display: "flex", alignItems: "center", gap: 10,
-                  padding: "8px 10px", borderRadius: 4, marginBottom: 2,
-                  color:      active ? "var(--text)"   : "var(--muted)",
+                  padding: "7px 10px", borderRadius: 4, marginBottom: 1,
+                  color:      active ? "var(--text)"     : "var(--muted)",
                   background: active ? "var(--surface2)" : "transparent",
                   fontSize: 12, textDecoration: "none", transition: "all 0.1s",
                 }}
               >
-                <span style={{ fontSize: 14, opacity: active ? 1 : 0.6 }}>{icon}</span>
-                {label}
+                <span style={{ fontSize: 13, opacity: active ? 1 : 0.5 }}>{item.icon}</span>
+                {item.label}
               </Link>
             );
           })}

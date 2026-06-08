@@ -130,3 +130,112 @@ export const systemApi = {
   ) =>
     req<void>("/system/changelog", { method: "POST", body: JSON.stringify(entry) }, token),
 };
+
+// ── CRM Notes ─────────────────────────────────────────────────────────────────
+
+export interface AdminNote {
+  id: string; userId: string; adminId: string; body: string; createdAt: string;
+  admin: { email: string; name: string };
+}
+
+export const notesApi = {
+  list:   (token: string, userId: string) =>
+    req<AdminNote[]>(`/admin/users/${userId}/notes`, {}, token),
+  add:    (token: string, userId: string, body: string) =>
+    req<AdminNote>(`/admin/users/${userId}/notes`, { method: "POST", body: JSON.stringify({ body }) }, token),
+  delete: (token: string, userId: string, noteId: string) =>
+    req<void>(`/admin/users/${userId}/notes/${noteId}`, { method: "DELETE" }, token),
+};
+
+// ── Admin Email ───────────────────────────────────────────────────────────────
+
+export const adminEmailApi = {
+  send: (token: string, userId: string, subject: string, body: string) =>
+    req<{ sent: boolean; to: string }>(`/admin/users/${userId}/email`, {
+      method: "POST", body: JSON.stringify({ subject, body }),
+    }, token),
+};
+
+// ── Campaigns ─────────────────────────────────────────────────────────────────
+
+export interface Campaign {
+  id: string; title: string; subject: string; body: string; target: string;
+  status: string; scheduledAt: string | null; sentAt: string | null;
+  sentCount: number; failedCount: number; createdAt: string;
+  admin: { email: string; name: string } | null;
+}
+
+export const campaignsApi = {
+  list: (token: string, page = 1) =>
+    req<{ campaigns: Campaign[]; total: number; pages: number }>(`/admin/campaigns?page=${page}`, {}, token),
+  get: (token: string, id: string) => req<Campaign>(`/admin/campaigns/${id}`, {}, token),
+  create: (token: string, data: { title: string; subject: string; body: string; target: string; scheduledAt?: string }) =>
+    req<Campaign>("/admin/campaigns", { method: "POST", body: JSON.stringify(data) }, token),
+  update: (token: string, id: string, data: Partial<{ title: string; subject: string; body: string; target: string }>) =>
+    req<Campaign>(`/admin/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(data) }, token),
+  delete: (token: string, id: string) => req<void>(`/admin/campaigns/${id}`, { method: "DELETE" }, token),
+  send:   (token: string, id: string) =>
+    req<{ queued: number }>(`/admin/campaigns/${id}/send`, { method: "POST", body: "{}" }, token),
+};
+
+// ── Promo Codes ───────────────────────────────────────────────────────────────
+
+export interface PromoCode {
+  id: string; code: string; description: string | null; discountPercent: number;
+  maxUses: number | null; usedCount: number; validFrom: string; validUntil: string | null;
+  isActive: boolean; createdAt: string; stripeCouponId: string | null;
+  admin: { email: string; name: string } | null;
+}
+
+export const promosApi = {
+  list: (token: string, page = 1) =>
+    req<{ codes: PromoCode[]; total: number; pages: number }>(`/admin/promos?page=${page}`, {}, token),
+  create: (token: string, data: { code: string; description?: string; discountPercent: number; maxUses?: number; validUntil?: string }) =>
+    req<PromoCode>("/admin/promos", { method: "POST", body: JSON.stringify(data) }, token),
+  toggle: (token: string, id: string, isActive: boolean) =>
+    req<PromoCode>(`/admin/promos/${id}/toggle`, { method: "PATCH", body: JSON.stringify({ isActive }) }, token),
+};
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+
+export interface AuditEntry {
+  id: string; adminId: string | null; userId: string | null; action: string;
+  resource: string; resourceId: string | null; metadata: unknown;
+  ipAddress: string | null; userAgent: string | null; createdAt: string;
+  admin: { email: string; name: string } | null;
+}
+
+export const auditApi = {
+  list: (token: string, params: { resource?: string; action?: string; page?: number; from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.resource) q.set("resource", params.resource);
+    if (params.action)   q.set("action",   params.action);
+    if (params.page)     q.set("page",     String(params.page));
+    if (params.from)     q.set("from",     params.from);
+    if (params.to)       q.set("to",       params.to);
+    return req<{ logs: AuditEntry[]; total: number; pages: number }>(
+      `/admin/audit?${q.toString()}`, {}, token,
+    );
+  },
+};
+
+// ── Accounting ────────────────────────────────────────────────────────────────
+
+export interface AccountingData {
+  mrrUsd: number;
+  activeSubscriptions: number;
+  canceledThisMonth: number;
+  newUsersThisMonth: number;
+  managedRevenue: { current: number; previous: number };
+  managedTokensThisMonth: number;
+  totalRequestsThisMonth: number;
+  recentSubscriptions: Array<{
+    id: string; stripeSubId: string; status: string;
+    currentPeriodEnd: string; createdAt: string;
+    user: { email: string; name: string | null; plan: string; createdAt: string };
+  }>;
+}
+
+export const accountingApi = {
+  get: (token: string) => req<AccountingData>("/admin/accounting", {}, token),
+};

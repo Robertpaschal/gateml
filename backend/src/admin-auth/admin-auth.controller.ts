@@ -17,6 +17,11 @@ class LoginDto {
   @IsString() @IsNotEmpty() password!: string;
 }
 
+class ChangePasswordDto {
+  @IsString() @IsNotEmpty() currentPassword!: string;
+  @IsString() @IsNotEmpty() newPassword!:     string;
+}
+
 class AddDomainDto {
   @IsString() @IsNotEmpty() domain!: string;
 }
@@ -73,6 +78,17 @@ export class AdminAuthController {
   @ApiOperation({ summary: 'Accept invite and set password — activates account' })
   acceptInvite(@Body() dto: AcceptInviteDto) {
     return this.adminAuth.acceptInvite(dto.token, dto.password);
+  }
+
+  // ── Change password ────────────────────────────────────────────────────────
+
+  @Post('change-password')
+  @UseGuards(AdminJwtGuard)
+  @ApiBearerAuth('jwt')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Change own admin password (invalidates other sessions)' })
+  changePassword(@GetAdminUser() admin: AdminUser, @Body() dto: ChangePasswordDto) {
+    return this.adminAuth.changePassword(admin.id, dto.currentPassword, dto.newPassword);
   }
 
   // ── Admin user management ──────────────────────────────────────────────────

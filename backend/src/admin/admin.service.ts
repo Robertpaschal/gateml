@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService }  from '../email/email.service';
 import { Plan }          from '@prisma/client';
@@ -230,5 +230,86 @@ export class AdminService {
       where: { id },
       data:  { status: status as any, updatedAt: new Date() },
     });
+  }
+
+  // ── Admin notes (CRM) ──────────────────────────────────────────────────────
+
+  async addNote(userId: string, adminId: string, body: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found.');
+    const { randomBytes } = await import('crypto');
+    return this.prisma.adminNote.create({
+      data: { id: randomBytes(10).toString('hex'), userId, adminId, body },
+      include: { admin: { select: { email: true, name: true } } },
+    });
+  }
+
+  async getNotes(userId: string) {
+    return this.prisma.adminNote.findMany({
+      where:   { userId },
+      orderBy: { createdAt: 'desc' },
+      include: { admin: { select: { email: true, name: true } } },
+    });
+  }
+
+  async deleteNote(noteId: string) {
+    return this.prisma.adminNote.delete({ where: { id: noteId } });
+  }
+
+  // ── Admin custom email ────────────────────────────────────────────────────
+
+  async sendCustomEmail(userId: string, adminName: string, subject: string, body: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found.');
+    this.email.sendAdminCustomMessage(user.email, user.name ?? '', subject, body, adminName);
+    return { sent: true, to: user.email };
+  }
+
+  // ── Accounting (enhanced) ─────────────────────────────────────────────────
+
+  async getFullAccounting() {
+    const now       = new Date();
+    const month     = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const [
+      activeSubs, canceledThisMonth, managedUsage, managedPrev,
+      recentSubs, newUsersThisMonth, totalRevenueSubs,
+    ] = await Promise.all([
+      this.prisma.subscription.count({ where: { status: 'active' } }),
+      this.prisma.subscription.count({
+        where: { status: 'canceled', updatedAt: { gte: monthStart } },
+      }),
+      this.prisma.usageRecord.aggregate({ where: { month }, _sum: { managedCostUsd: true, tokensUsed: true, requests: true } }),
+      this.prisma.usageRecord.aggregate({ where: { month: prevMonth }, _sum: { managedCostUsd: true } }),
+      this.prisma.subscription.findMany({
+        where:   { status: 'active' },
+        orderBy: { createdAt: 'desc' },
+        take:    20,
+        include: { user: { select: { email: true, name: true, plan: true, createdAt: true } } },
+      }),
+      this.prisma.user.count({ where: { createdAt: { gte: monthStart } } }),
+      this.prisma.subscription.count({ where: { status: { in: ['active', 'trialing'] } } }),
+    ]);
+
+    const mrrUsd         = activeSubs * 19;
+    const managedRevenue = managedUsage._sum.managedCostUsd ?? 0;
+    const managedPrev_   = managedPrev._sum.managedCostUsd  ?? 0;
+
+    return {
+      mrrUsd,
+      activeSubscriptions: activeSubs,
+      canceledThisMonth,
+      newUsersThisMonth,
+      managedRevenue: {
+        current:  Math.round(managedRevenue  * 100) / 100,
+        previous: Math.round(managedPrev_    * 100) / 100,
+      },
+      managedTokensThisMonth: managedUsage._sum.tokensUsed ?? 0,
+      totalRequestsThisMonth: managedUsage._sum.requests   ?? 0,
+      recentSubscriptions:    recentSubs,
+    };
   }
 }

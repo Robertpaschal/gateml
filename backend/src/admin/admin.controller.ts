@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Patch, Body, Param, Query, Req,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query, Req,
   UseGuards, ParseIntPipe, DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -12,9 +12,14 @@ import { GetAdminUser }  from '../admin-auth/decorators/admin-user.decorator';
 import { AuditService }  from '../audit/audit.service';
 import type { AdminUser } from '@prisma/client';
 
-class UpdatePlanDto { @IsEnum(Plan)                          plan!:   Plan;   }
-class ReplyDto       { @IsString() @IsNotEmpty()             body!:   string; }
-class UpdateStatusDto{ @IsString() @IsNotEmpty() @IsOptional() status?: string; }
+class UpdatePlanDto   { @IsEnum(Plan)              @IsNotEmpty()             plan!:    Plan;   }
+class ReplyDto         { @IsString()                @IsNotEmpty()             body!:    string; }
+class UpdateStatusDto  { @IsString()                @IsNotEmpty() @IsOptional() status?: string; }
+class NoteDto          { @IsString()                @IsNotEmpty()             body!:    string; }
+class SendEmailDto     {
+  @IsString() @IsNotEmpty() subject!: string;
+  @IsString() @IsNotEmpty() body!:    string;
+}
 
 @ApiTags('admin')
 @Controller('admin')
@@ -32,14 +37,6 @@ export class AdminController {
   @ApiOperation({ summary: 'Platform analytics overview' })
   analytics() {
     return this.admin.getAnalytics();
-  }
-
-  // ── Accounting ────────────────────────────────────────────────────────────
-
-  @Get('accounting')
-  @ApiOperation({ summary: 'Revenue and billing summary (Stripe + managed usage)' })
-  accounting() {
-    return this.admin.getAccounting();
   }
 
   // ── Users ──────────────────────────────────────────────────────────────────
@@ -115,6 +112,58 @@ export class AdminController {
     return result;
   }
 
+  // ── CRM notes ─────────────────────────────────────────────────────────────
+
+  @Post('users/:id/notes')
+  @ApiOperation({ summary: 'Add a CRM note to a user' })
+  async addNote(
+    @Param('id') id: string, @Body() dto: NoteDto,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.admin.addNote(id, admin.id, dto.body);
+    await this.audit.log({ adminId: admin.id, resource: 'user', resourceId: id, action: 'user.note_added', req });
+    return result;
+  }
+
+  @Get('users/:id/notes')
+  @ApiOperation({ summary: 'Get CRM notes for a user' })
+  getNotes(@Param('id') id: string) {
+    return this.admin.getNotes(id);
+  }
+
+  @Delete('users/:userId/notes/:noteId')
+  @ApiOperation({ summary: 'Delete a CRM note' })
+  async deleteNote(
+    @Param('userId') userId: string, @Param('noteId') noteId: string,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.admin.deleteNote(noteId);
+    await this.audit.log({ adminId: admin.id, resource: 'user', resourceId: userId, action: 'user.note_deleted', req });
+    return result;
+  }
+
+  // ── Admin custom email ────────────────────────────────────────────────────
+
+  @Post('users/:id/email')
+  @ApiOperation({ summary: 'Send a custom email to a user from admin' })
+  async sendEmail(
+    @Param('id') id: string, @Body() dto: SendEmailDto,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.admin.sendCustomEmail(id, admin.name, dto.subject, dto.body);
+    await this.audit.log({ adminId: admin.id, resource: 'user', resourceId: id,
+      action: 'user.email_sent', metadata: { subject: dto.subject }, req });
+    return result;
+  }
+
+  // ── Accounting (full) ─────────────────────────────────────────────────────
+
+  @Get('accounting')
+  @ApiOperation({ summary: 'Full accounting & revenue summary' })
+  accounting() {
+    return this.admin.getFullAccounting();
+  }
+
   // ── Audit log ──────────────────────────────────────────────────────────────
 
   @Get('audit')
@@ -124,9 +173,15 @@ export class AdminController {
     @Query('action')    action?:    string,
     @Query('adminId')   adminId?:   string,
     @Query('userId')    userId?:    string,
+    @Query('from')      from?:      string,
+    @Query('to')        to?:        string,
     @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page  = 1,
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
   ) {
-    return this.audit.query({ resource, action, adminId, userId, page, limit });
+    return this.audit.query({
+      resource, action, adminId, userId, page, limit,
+      from: from ? new Date(from) : undefined,
+      to:   to   ? new Date(to)   : undefined,
+    });
   }
 }

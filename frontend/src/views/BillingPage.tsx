@@ -5,6 +5,7 @@ import { billingApi } from "../lib/api";
 import { useToken }   from "../hooks/useToken";
 import type { BillingMe } from "../lib/api";
 import Link from "next/link";
+import { Check, X } from "lucide-react";
 
 const PRICE_IDS = {
   PRO_MONTHLY: process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY ?? "",
@@ -339,8 +340,8 @@ export function BillingPage() {
             ].map(([label, free, pro]) => (
               <tr key={label}>
                 <td>{label}</td>
-                <td style={{ color: free === "✗" ? "var(--muted2)" : free === "✓" ? "var(--accent2)" : "var(--text)" }}>{free}</td>
-                <td style={{ color: pro  === "✗" ? "var(--muted2)" : pro  === "✓" ? "var(--accent2)" : "var(--accent)" }}>{pro}</td>
+                <td>{planCell(free, "free")}</td>
+                <td>{planCell(pro,  "pro")}</td>
               </tr>
             ))}
           </tbody>
@@ -387,12 +388,20 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () => void 
   );
 }
 
+function planCell(value: string, col: "free" | "pro") {
+  if (value === "✓") return <Check size={13} color={col === "pro" ? "var(--accent)" : "var(--accent2)"} strokeWidth={2.5} />;
+  if (value === "✗") return <X size={13} color="var(--muted2)" strokeWidth={2} />;
+  return <span style={{ color: col === "pro" ? "var(--accent)" : "var(--text)" }}>{value}</span>;
+}
+
 function FeatureList({ features }: { features: [string, boolean][] }) {
   return (
     <ul style={{ listStyle: "none", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px" }}>
       {features.map(([label, included]) => (
         <li key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: included ? "var(--muted)" : "var(--muted2)" }}>
-          <span style={{ color: included ? "var(--accent)" : "var(--muted2)", fontSize: 10 }}>{included ? "✓" : "✗"}</span>
+          {included
+            ? <Check size={12} color="var(--accent)" strokeWidth={2.5} style={{ flexShrink: 0 }} />
+            : <X size={12} color="var(--muted2)" strokeWidth={2.5} style={{ flexShrink: 0 }} />}
           {label}
         </li>
       ))}

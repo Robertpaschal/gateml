@@ -216,6 +216,7 @@ export function Pricing() {
             style={{ width: "100%", justifyContent: "center", display: "flex" }}>
             Get started
           </Link>
+          <p className="pricing-cta-note">No credit card required</p>
         </div>
 
         {/* Pro */}
@@ -233,32 +234,27 @@ export function Pricing() {
             style={{ width: "100%", justifyContent: "center", display: "flex" }}>
             Start free trial
           </Link>
-          <p style={{ fontSize: 10, color: "var(--muted2)", textAlign: "center", marginTop: 12 }}>
-            7-day free trial · cancel anytime
-          </p>
+          <p className="pricing-cta-note">7-day free trial · cancel anytime</p>
         </div>
 
         {/* Enterprise */}
-        <div className="pricing-card" style={{ display: "flex", flexDirection: "column" }}>
+        <div className="pricing-card">
           <div className="pricing-name">Enterprise</div>
           <div className="pricing-desc">Unlimited scale, SLA, and dedicated support.</div>
           <div className="pricing-price">
             Custom<span />
           </div>
-          <ul className="pricing-features" style={{ flex: 1 }}>
+          <ul className="pricing-features">
             {ENTERPRISE_FEATURES.map(f => <li key={f}>{f}</li>)}
           </ul>
           <button
             className="btn-ghost-lg"
-            style={{ width: "100%", textAlign: "center", cursor: "pointer",
-                     background: "transparent", fontFamily: "var(--font-mono)" }}
+            style={{ width: "100%", justifyContent: "center" }}
             onClick={() => setShowEnterprise(true)}
           >
             Talk to us
           </button>
-          <p style={{ fontSize: 10, color: "var(--muted2)", textAlign: "center", marginTop: 10 }}>
-            Response within 1 business day
-          </p>
+          <p className="pricing-cta-note">Response within 1 business day</p>
         </div>
       </div>
 

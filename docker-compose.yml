@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─── GateML — Local Development Stack ────────────────────────────────────────
 # Usage:
 #   docker compose up --build   # rebuild images and start
@@ -37,8 +35,10 @@ services:
     restart: unless-stopped
     env_file: ./backend/.env
     environment:
-      DATABASE_URL: postgresql://gateml:gateml@db:5432/gateml   # Overrides .env — uses Docker service name
-      NODE_ENV:     development
+      DATABASE_URL:        postgresql://gateml:gateml@db:5432/gateml   # Overrides .env — uses Docker service name
+      NODE_ENV:            development
+      FRONTEND_URL:        http://localhost:3000    # Browser-side origin for CORS
+      ADMIN_FRONTEND_URL:  http://localhost:3002    # Admin panel origin for CORS
     volumes:
       - ./backend/src:/app/src:ro  # Mount source for hot reload
     ports:

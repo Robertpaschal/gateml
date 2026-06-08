@@ -26,6 +26,7 @@ const NAV = [
   { href: "/dashboard/replay",   label: "Replay",        icon: "replay" },
   { href: "/dashboard/billing",  label: "Billing",       icon: "billing" },
   { href: "/dashboard/support",  label: "Support",       icon: "support" },
+  { href: "/dashboard/account",  label: "Account",       icon: "account" },
 ];
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -38,6 +39,7 @@ const ICONS: Record<string, React.ReactNode> = {
   billing:   <><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></>,
   logout:    <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>,
   support:   <><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></>,
+  account:   <><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
 };
 
 function NavIcon({ name }: { name: string }) {
@@ -190,15 +192,38 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           )}
 
           {/* Live system status from Firestore */}
-          <div style={{ marginTop: billing ? 10 : 0 }}>
+          <div style={{ marginTop: billing ? 10 : 0, marginBottom: 10, fontSize: 10, color: "var(--muted2)" }}>
             <span className="status-dot" style={{ background: sysStatus.operational ? "var(--accent)" : "var(--warn)" }} />
             {sysStatus.message}
           </div>
-          <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 10, color: "var(--muted2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{email}</span>
+
+          {/* User row */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 0",
+            borderTop: "1px solid var(--border)",
+          }}>
+            <div style={{
+              width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
+              background: "var(--surface2)", border: "1px solid var(--border2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 11, color: "var(--muted)", fontFamily: "var(--font-ui)", fontWeight: 700,
+            }}>
+              {email ? email[0].toUpperCase() : "?"}
+            </div>
+            <Link href="/dashboard/account" style={{
+              flex: 1, minWidth: 0, textDecoration: "none",
+            }}>
+              <div style={{ fontSize: 10, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {email}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--muted2)", marginTop: 1 }}>Account settings</div>
+            </Link>
             <button onClick={logout} title="Sign out"
-              style={{ background: "none", border: "none", color: "var(--muted2)", cursor: "pointer", padding: 2 }}>
-              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              style={{ background: "none", border: "none", color: "var(--muted2)", cursor: "pointer", padding: 4, borderRadius: 4, flexShrink: 0 }}
+              onMouseEnter={e => (e.currentTarget.style.color = "var(--text)")}
+              onMouseLeave={e => (e.currentTarget.style.color = "var(--muted2)")}>
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 {ICONS.logout}
               </svg>
             </button>
@@ -211,7 +236,32 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         <div className="topbar">
           <div>
             <div className="topbar-title">{pageTitle}</div>
-            <div className="topbar-sub">gateml.io · production</div>
+            <div className="topbar-sub">GateML · {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+          </div>
+          <div className="topbar-right" style={{ gap: 12 }}>
+            {billing && (
+              <Link href="/dashboard/billing" style={{ textDecoration: "none" }}>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                  background: billing.plan === "PRO" ? "rgba(0,255,136,0.1)" : billing.plan === "ENTERPRISE" ? "rgba(0,201,255,0.1)" : "rgba(107,122,150,0.12)",
+                  color: billing.plan === "PRO" ? "var(--accent)" : billing.plan === "ENTERPRISE" ? "var(--accent2)" : "var(--muted)",
+                  border: `1px solid ${billing.plan === "PRO" ? "rgba(0,255,136,0.3)" : billing.plan === "ENTERPRISE" ? "rgba(0,201,255,0.3)" : "var(--border2)"}`,
+                  borderRadius: 5, padding: "3px 9px",
+                  fontFamily: "var(--font-ui)", display: "inline-block",
+                }}>
+                  {billing.plan}
+                </span>
+              </Link>
+            )}
+            {billing && !billing.payAsYouGo && billing.plan !== "ENTERPRISE" && (() => {
+              const pct = Math.min((billing.usage.requests / billing.limits.liveRequestsPerMonth) * 100, 100);
+              if (pct < 80) return null;
+              return (
+                <Link href="/dashboard/billing" style={{ textDecoration: "none", fontSize: 10, color: pct >= 100 ? "var(--danger)" : "var(--warn)" }}>
+                  {pct >= 100 ? "Quota reached" : `${pct.toFixed(0)}% quota used`}
+                </Link>
+              );
+            })()}
           </div>
         </div>
         <div className="content">{children}</div>

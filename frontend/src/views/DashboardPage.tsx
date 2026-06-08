@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { statsApi, logsApi } from "../lib/api";
 import { useToken } from "../hooks/useToken";
 import { Sparkline } from "../components/Sparkline";
@@ -76,8 +77,13 @@ export function DashboardPage() {
           <span className="tag tag-blue">{logs.length} shown</span>
         </div>
         {logs.length === 0 ? (
-          <div style={{ color: "var(--muted)", fontSize: 12, padding: "20px 0" }}>
-            No requests yet. Make your first call through the gateway and it will appear here.
+          <div style={{ padding: "24px 0", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+              No requests yet. Make your first call through the gateway and it will appear here.
+            </div>
+            <Link href="/dashboard/gateway" className="btn btn-ghost" style={{ fontSize: 11 }}>
+              Go to Gateway setup →
+            </Link>
           </div>
         ) : logs.map(l => (
           <div key={l.id} className="log-entry">

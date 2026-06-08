@@ -335,7 +335,12 @@ export function GatewayPage() {
             { title: "Go", code: `import "github.com/gateml/gateml-go"\n\nclient := gateml.NewClient("gml-sk-live_...")` },
           ].map(s => (
             <div className="card" style={{ marginBottom: 16 }} key={s.title}>
-              <div className="card-title" style={{ marginBottom: 12 }}>{s.title}</div>
+              <div className="card-header" style={{ marginBottom: 12 }}>
+                <div className="card-title">{s.title}</div>
+                <button className="btn btn-ghost" style={{ fontSize: 10 }} onClick={() => copy(s.code, s.title)}>
+                  <Icon name="copy" size={11} /> {copied === s.title ? "Copied!" : "Copy"}
+                </button>
+              </div>
               <div className="code-area" style={{ fontSize: 11 }}>{s.code}</div>
             </div>
           ))}

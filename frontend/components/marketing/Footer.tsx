@@ -189,11 +189,7 @@ export function Footer() {
             <a href="#">Blog</a>
             <a href="#">Twitter / X</a>
             <a href="#">Discord</a>
-            <button
-              onClick={() => setShowContact(true)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "inherit",
-                fontSize: "inherit", fontFamily: "inherit", padding: 0, textAlign: "left" }}
-            >
+            <button onClick={() => setShowContact(true)}>
               Contact
             </button>
           </div>

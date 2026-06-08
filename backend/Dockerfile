@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 
 COPY package.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 COPY . .
 RUN npx prisma generate
@@ -21,7 +21,7 @@ ENV NODE_ENV=production
 RUN apk add --no-cache openssl
 
 COPY package.json ./
-RUN npm install --omit=dev
+RUN npm install --omit=dev --legacy-peer-deps
 
 COPY --from=builder /app/dist        ./dist
 COPY --from=builder /app/prisma      ./prisma

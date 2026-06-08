@@ -239,3 +239,42 @@ export interface AccountingData {
 export const accountingApi = {
   get: (token: string) => req<AccountingData>("/admin/accounting", {}, token),
 };
+
+// ── Admin team management ─────────────────────────────────────────────────────
+
+export interface TeamMemberRow {
+  id: string; email: string; name: string; role: string;
+  isActive: boolean; lastLoginAt: string | null; createdAt: string;
+  passwordHash?: string | null;
+  invitedByAdmin: { email: string; name: string } | null;
+}
+
+export const adminsApi = {
+  list:         (token: string) =>
+    req<TeamMemberRow[]>("/admin/auth/admins", {}, token),
+  invite:       (token: string, data: { email: string; name: string; role: string }) =>
+    req<{ message: string; id: string }>("/admin/auth/invite", { method: "POST", body: JSON.stringify(data) }, token),
+  deactivate:   (token: string, id: string) =>
+    req<{ message: string }>(`/admin/auth/admins/${id}/deactivate`, { method: "PATCH" }, token),
+  reactivate:   (token: string, id: string) =>
+    req<{ message: string }>(`/admin/auth/admins/${id}/reactivate`, { method: "PATCH" }, token),
+  changeRole:   (token: string, id: string, role: string) =>
+    req<{ message: string }>(`/admin/auth/admins/${id}/role`, { method: "PATCH", body: JSON.stringify({ role }) }, token),
+  resendInvite: (token: string, id: string) =>
+    req<{ message: string }>(`/admin/auth/admins/${id}/resend-invite`, { method: "POST" }, token),
+};
+
+// ── Domain allowlist ──────────────────────────────────────────────────────────
+
+export interface DomainEntry {
+  id?: string; domain: string; createdAt?: string; source: "env" | "db";
+}
+
+export const domainsApi = {
+  list:   (token: string) =>
+    req<{ env: DomainEntry[]; db: DomainEntry[] }>("/admin/auth/domains", {}, token),
+  add:    (token: string, domain: string) =>
+    req<DomainEntry>("/admin/auth/domains", { method: "POST", body: JSON.stringify({ domain }) }, token),
+  remove: (token: string, domain: string) =>
+    req<void>(`/admin/auth/domains/${encodeURIComponent(domain)}`, { method: "DELETE" }, token),
+};

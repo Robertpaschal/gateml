@@ -70,7 +70,13 @@ export class AdminAuthService {
 
   async invite(inviterAdminId: string, email: string, name: string, role: AdminRole = 'SUPPORT') {
     const inviter = await this.prisma.adminUser.findUnique({ where: { id: inviterAdminId } });
-    if (!inviter || inviter.role !== 'SUPER_ADMIN') throw new ForbiddenException('Only SUPER_ADMIN can invite admins.');
+    if (!inviter || !['SUPER_ADMIN', 'ADMIN'].includes(inviter.role)) {
+      throw new ForbiddenException('Only SUPER_ADMIN or ADMIN can invite team members.');
+    }
+    // ADMIN can only invite SUPPORT or ANALYST, not peers or superiors
+    if (inviter.role === 'ADMIN' && !['SUPPORT', 'ANALYST'].includes(role)) {
+      throw new ForbiddenException('ADMIN can only invite SUPPORT or ANALYST roles.');
+    }
 
     await this.assertDomainAllowed(email);
 
@@ -143,11 +149,18 @@ export class AdminAuthService {
 
   async deactivate(requesterId: string, targetId: string) {
     const requester = await this.prisma.adminUser.findUnique({ where: { id: requesterId } });
-    if (!requester || requester.role !== 'SUPER_ADMIN') throw new ForbiddenException('Only SUPER_ADMIN can deactivate admins.');
+    if (!requester || !['SUPER_ADMIN', 'ADMIN'].includes(requester.role)) {
+      throw new ForbiddenException('Only SUPER_ADMIN or ADMIN can deactivate team members.');
+    }
     if (requesterId === targetId) throw new BadRequestException('You cannot deactivate yourself.');
 
     const target = await this.prisma.adminUser.findUnique({ where: { id: targetId } });
     if (!target) throw new NotFoundException('Admin not found.');
+
+    // ADMIN can only deactivate roles below them
+    if (requester.role === 'ADMIN' && !['SUPPORT', 'ANALYST'].includes(target.role)) {
+      throw new ForbiddenException('ADMIN can only deactivate SUPPORT or ANALYST accounts.');
+    }
 
     // Increment tokenVersion to immediately invalidate all existing JWTs
     await this.prisma.adminUser.update({
@@ -159,13 +172,65 @@ export class AdminAuthService {
 
   async reactivate(requesterId: string, targetId: string) {
     const requester = await this.prisma.adminUser.findUnique({ where: { id: requesterId } });
-    if (!requester || requester.role !== 'SUPER_ADMIN') throw new ForbiddenException('Only SUPER_ADMIN can reactivate admins.');
+    if (!requester || !['SUPER_ADMIN', 'ADMIN'].includes(requester.role)) {
+      throw new ForbiddenException('Only SUPER_ADMIN or ADMIN can reactivate team members.');
+    }
 
     const target = await this.prisma.adminUser.findUnique({ where: { id: targetId } });
     if (!target) throw new NotFoundException('Admin not found.');
 
+    if (requester.role === 'ADMIN' && !['SUPPORT', 'ANALYST'].includes(target.role)) {
+      throw new ForbiddenException('ADMIN can only reactivate SUPPORT or ANALYST accounts.');
+    }
+
     await this.prisma.adminUser.update({ where: { id: targetId }, data: { isActive: true } });
     return { message: `Admin ${target.email} reactivated.` };
+  }
+
+  // ── Change role ────────────────────────────────────────────────────────────
+
+  async changeRole(requesterId: string, targetId: string, newRole: AdminRole) {
+    const requester = await this.prisma.adminUser.findUnique({ where: { id: requesterId } });
+    if (!requester || requester.role !== 'SUPER_ADMIN') {
+      throw new ForbiddenException('Only SUPER_ADMIN can change admin roles.');
+    }
+    if (requesterId === targetId) throw new BadRequestException('You cannot change your own role.');
+
+    const target = await this.prisma.adminUser.findUnique({ where: { id: targetId } });
+    if (!target) throw new NotFoundException('Admin not found.');
+
+    // Changing role invalidates existing sessions — new role is reflected on next login
+    const updated = await this.prisma.adminUser.update({
+      where: { id: targetId },
+      data:  { role: newRole, tokenVersion: { increment: 1 } },
+    });
+    return { message: `${target.email} is now ${newRole}. Their sessions have been invalidated.`, admin: this.publicAdmin(updated) };
+  }
+
+  // ── Resend invite ──────────────────────────────────────────────────────────
+
+  async resendInvite(requesterId: string, targetId: string) {
+    const requester = await this.prisma.adminUser.findUnique({ where: { id: requesterId } });
+    if (!requester || !['SUPER_ADMIN', 'ADMIN'].includes(requester.role)) {
+      throw new ForbiddenException('Only SUPER_ADMIN or ADMIN can resend invites.');
+    }
+
+    const target = await this.prisma.adminUser.findUnique({ where: { id: targetId } });
+    if (!target) throw new NotFoundException('Admin not found.');
+    if (target.passwordHash) throw new BadRequestException('This admin has already accepted their invite.');
+
+    const inviteToken  = randomBytes(32).toString('hex');
+    const inviteExpiry = new Date(Date.now() + INVITE_TTL_HOURS * 3_600_000);
+
+    await this.prisma.adminUser.update({
+      where: { id: targetId },
+      data:  { inviteToken, inviteExpiry },
+    });
+
+    const acceptUrl = `${this.adminFrontendUrl}/accept-invite?token=${inviteToken}`;
+    this.email.sendAdminInvite(target.email, target.name, target.role, acceptUrl, requester.name);
+
+    return { message: `Invite resent to ${target.email}.` };
   }
 
   // ── List admins ────────────────────────────────────────────────────────────

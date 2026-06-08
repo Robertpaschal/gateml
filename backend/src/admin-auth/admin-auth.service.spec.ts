@@ -107,9 +107,65 @@ describe('AdminAuthService', () => {
       });
       mockPrisma.adminUser.update.mockResolvedValue({
         id: 'a1', email: 'a@x.com', name: 'Admin', role: 'SUPPORT', isActive: true,
+        tokenVersion: 0,
       });
       const result = await service.acceptInvite('valid-token', 'securePass123!!');
       expect(result.token).toBe('admin-jwt');
+    });
+  });
+
+  describe('invite — ADMIN role tier', () => {
+    it('allows ADMIN to invite SUPPORT', async () => {
+      mockPrisma.adminUser.findUnique
+        .mockResolvedValueOnce({ id: 'a1', role: 'ADMIN', isActive: true })  // inviter
+        .mockResolvedValueOnce(null);                                          // no existing
+      mockPrisma.adminUser.create.mockResolvedValue({ id: 'a2', email: 'n@x.com' });
+      await expect(service.invite('a1', 'new@x.com', 'New', 'SUPPORT')).resolves.toBeDefined();
+    });
+
+    it('prevents ADMIN from inviting another ADMIN', async () => {
+      mockPrisma.adminUser.findUnique.mockResolvedValueOnce({ id: 'a1', role: 'ADMIN', isActive: true });
+      await expect(service.invite('a1', 'new@x.com', 'New', 'ADMIN')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('prevents SUPPORT from inviting', async () => {
+      mockPrisma.adminUser.findUnique.mockResolvedValueOnce({ id: 'a1', role: 'SUPPORT', isActive: true });
+      await expect(service.invite('a1', 'new@x.com', 'New', 'SUPPORT')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('changeRole', () => {
+    it('allows SUPER_ADMIN to change a role', async () => {
+      mockPrisma.adminUser.findUnique
+        .mockResolvedValueOnce({ id: 'sa', role: 'SUPER_ADMIN' })  // requester
+        .mockResolvedValueOnce({ id: 'a2', email: 'x@x.com', role: 'SUPPORT' }); // target
+      mockPrisma.adminUser.update.mockResolvedValue({
+        id: 'a2', email: 'x@x.com', name: 'X', role: 'ADMIN', isActive: true,
+      });
+      const result = await service.changeRole('sa', 'a2', 'ADMIN');
+      expect(result.message).toMatch(/ADMIN/);
+    });
+
+    it('prevents ADMIN from changing roles', async () => {
+      mockPrisma.adminUser.findUnique.mockResolvedValueOnce({ id: 'a1', role: 'ADMIN' });
+      await expect(service.changeRole('a1', 'a2', 'SUPPORT')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('deactivate — ADMIN tier', () => {
+    it('allows ADMIN to deactivate SUPPORT', async () => {
+      mockPrisma.adminUser.findUnique
+        .mockResolvedValueOnce({ id: 'a1', role: 'ADMIN' })           // requester
+        .mockResolvedValueOnce({ id: 'a2', email: 'x@x.com', role: 'SUPPORT' }); // target
+      mockPrisma.adminUser.update.mockResolvedValue({});
+      await expect(service.deactivate('a1', 'a2')).resolves.toBeDefined();
+    });
+
+    it('prevents ADMIN from deactivating another ADMIN', async () => {
+      mockPrisma.adminUser.findUnique
+        .mockResolvedValueOnce({ id: 'a1', role: 'ADMIN' })
+        .mockResolvedValueOnce({ id: 'a2', email: 'x@x.com', role: 'ADMIN' });
+      await expect(service.deactivate('a1', 'a2')).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 });

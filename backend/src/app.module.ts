@@ -26,6 +26,7 @@ import { AdminModule }               from './admin/admin.module';
 import { SupportModule }             from './support/support.module';
 import { CampaignsModule }           from './campaigns/campaigns.module';
 import { PromosModule }              from './promos/promos.module';
+import { UnsubscribeModule }         from './unsubscribe/unsubscribe.module';
 import { CorrelationIdMiddleware }   from './common/middleware/correlation-id.middleware';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { APP_INTERCEPTOR }           from '@nestjs/core';
@@ -81,6 +82,7 @@ import { APP_INTERCEPTOR }           from '@nestjs/core';
     SupportModule,
     CampaignsModule,
     PromosModule,
+    UnsubscribeModule,
 
     // Admin
     AdminAuthModule,

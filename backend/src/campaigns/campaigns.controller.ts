@@ -10,6 +10,8 @@ import { Request }          from 'express';
 import { CampaignTarget }   from '@prisma/client';
 import { CampaignsService } from './campaigns.service';
 import { AdminJwtGuard }    from '../admin-auth/guards/admin-jwt.guard';
+import { AdminRolesGuard }  from '../admin-auth/guards/admin-roles.guard';
+import { AdminRoles }       from '../admin-auth/decorators/admin-roles.decorator';
 import { GetAdminUser }     from '../admin-auth/decorators/admin-user.decorator';
 import { AuditService }     from '../audit/audit.service';
 import type { AdminUser }   from '@prisma/client';
@@ -32,7 +34,8 @@ class UpdateCampaignDto {
 
 @ApiTags('admin/campaigns')
 @Controller('admin/campaigns')
-@UseGuards(AdminJwtGuard)
+@UseGuards(AdminJwtGuard, AdminRolesGuard)
+@AdminRoles('SUPER_ADMIN', 'ADMIN')
 @ApiBearerAuth('jwt')
 export class CampaignsController {
   constructor(

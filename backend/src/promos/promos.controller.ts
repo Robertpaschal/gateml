@@ -6,11 +6,13 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsString, IsNotEmpty, IsInt, Min, Max, IsOptional, IsBoolean, IsDateString } from 'class-validator';
 import { Type }          from 'class-transformer';
 import { Request }       from 'express';
-import { PromosService } from './promos.service';
-import { AdminJwtGuard } from '../admin-auth/guards/admin-jwt.guard';
-import { GetAdminUser }  from '../admin-auth/decorators/admin-user.decorator';
-import { AuditService }  from '../audit/audit.service';
-import type { AdminUser } from '@prisma/client';
+import { PromosService }   from './promos.service';
+import { AdminJwtGuard }   from '../admin-auth/guards/admin-jwt.guard';
+import { AdminRolesGuard } from '../admin-auth/guards/admin-roles.guard';
+import { AdminRoles }      from '../admin-auth/decorators/admin-roles.decorator';
+import { GetAdminUser }    from '../admin-auth/decorators/admin-user.decorator';
+import { AuditService }    from '../audit/audit.service';
+import type { AdminUser }  from '@prisma/client';
 
 class CreatePromoDto {
   @IsString()  @IsNotEmpty()          code!:            string;
@@ -26,7 +28,8 @@ class TogglePromoDto {
 
 @ApiTags('admin/promos')
 @Controller('admin/promos')
-@UseGuards(AdminJwtGuard)
+@UseGuards(AdminJwtGuard, AdminRolesGuard)
+@AdminRoles('SUPER_ADMIN', 'ADMIN')
 @ApiBearerAuth('jwt')
 export class PromosController {
   constructor(

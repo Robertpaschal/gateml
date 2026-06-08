@@ -11,6 +11,7 @@ import { CAMPAIGN_EMAIL_QUEUE, CampaignEmailJobData } from '../email/email.queue
 import * as Handlebars    from 'handlebars';
 import * as fs            from 'fs';
 import * as path          from 'path';
+import { createHmac }     from 'crypto';
 
 const TEMPLATE_PATH = path.join(__dirname, '..', 'email', 'templates', 'campaign.hbs');
 const LAYOUT_PATH   = path.join(__dirname, '..', 'email', 'templates', 'layouts', 'base.hbs');
@@ -102,17 +103,18 @@ export class CampaignsService {
 
     this.logger.log(`Sending campaign "${campaign.title}" to ${users.length} users`);
 
-    const appUrl      = this.config.get<string>('APP_URL') ?? 'https://app.gateml.com';
-    const unsubscribeUrl = `${appUrl}/unsubscribe`; // placeholder
+    const appUrl = this.config.get<string>('APP_URL') ?? 'https://app.gateml.com';
 
-    const html = this.renderCampaignHtml(campaign.subject, campaign.body, unsubscribeUrl, appUrl);
-
-    // Enqueue one job per recipient (BullMQ handles rate limiting / retries)
-    const jobs = users.map(u => ({
-      name: 'send_campaign',
-      data: { campaignId, to: u.email, subject: campaign.subject, html } as CampaignEmailJobData,
-      opts: { priority: 10 }, // low priority vs transactional
-    }));
+    // Enqueue one job per recipient with a per-user unsubscribe URL (HMAC-signed, no DB storage)
+    const jobs = users.map(u => {
+      const unsubscribeUrl = this.buildUnsubscribeUrl(u.email, appUrl);
+      const html = this.renderCampaignHtml(campaign.subject, campaign.body, unsubscribeUrl, appUrl);
+      return {
+        name: 'send_campaign',
+        data: { campaignId, to: u.email, subject: campaign.subject, html } as CampaignEmailJobData,
+        opts: { priority: 10 },
+      };
+    });
 
     await this.queue.addBulk(jobs);
 
@@ -125,12 +127,20 @@ export class CampaignsService {
     return { queued: users.length };
   }
 
+  private buildUnsubscribeUrl(email: string, appUrl: string): string {
+    const secret = this.config.get<string>('UNSUBSCRIBE_SECRET') ?? 'gateml-unsub-secret';
+    const token  = createHmac('sha256', secret).update(email).digest('hex');
+    const e      = Buffer.from(email).toString('base64url');
+    return `${appUrl}/unsubscribe?e=${e}&t=${token}`;
+  }
+
   private targetWhere(target: CampaignTarget) {
-    if (target === 'ALL')        return {};
-    if (target === 'FREE')       return { plan: 'FREE'       as const };
-    if (target === 'PRO')        return { plan: 'PRO'        as const };
-    if (target === 'ENTERPRISE') return { plan: 'ENTERPRISE' as const };
-    return {};
+    const base = { unsubscribedFromMarketing: false };
+    if (target === 'ALL')        return base;
+    if (target === 'FREE')       return { ...base, plan: 'FREE'       as const };
+    if (target === 'PRO')        return { ...base, plan: 'PRO'        as const };
+    if (target === 'ENTERPRISE') return { ...base, plan: 'ENTERPRISE' as const };
+    return base;
   }
 
   private renderCampaignHtml(subject: string, body: string, unsubscribeUrl: string, appUrl: string): string {

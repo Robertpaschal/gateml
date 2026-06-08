@@ -23,6 +23,7 @@ enum Plan {
 
 enum AdminRole {
   SUPER_ADMIN
+  ADMIN
   SUPPORT
   ANALYST
 }
@@ -181,6 +182,7 @@ model User {
   stripeCustomerId         String?   @unique
   payAsYouGo               Boolean   @default(false)
   useManaged               Boolean   @default(false)
+  unsubscribedFromMarketing Boolean  @default(false)
 
   // In-house email/password auth (optional — null for OAuth-only users)
   passwordHash             String?

@@ -3,13 +3,16 @@ import {
   UseGuards, HttpCode,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { IsString, IsEmail, IsNotEmpty }  from 'class-validator';
+import { IsString, IsEmail, IsNotEmpty, IsEnum } from 'class-validator';
 import { AdminAuthService }               from './admin-auth.service';
 import { AdminJwtGuard }                  from './guards/admin-jwt.guard';
+import { AdminRolesGuard }                from './guards/admin-roles.guard';
+import { AdminRoles }                     from './decorators/admin-roles.decorator';
 import { GetAdminUser }                   from './decorators/admin-user.decorator';
 import { InviteAdminDto }                 from './dto/invite-admin.dto';
 import { AcceptInviteDto }                from './dto/accept-invite.dto';
 import { BootstrapAdminDto }              from './dto/bootstrap-admin.dto';
+import { AdminRole }                      from '@prisma/client';
 import type { AdminUser }                 from '@prisma/client';
 
 class LoginDto {
@@ -24,6 +27,10 @@ class ChangePasswordDto {
 
 class AddDomainDto {
   @IsString() @IsNotEmpty() domain!: string;
+}
+
+class ChangeRoleDto {
+  @IsEnum(AdminRole) role!: AdminRole;
 }
 
 @ApiTags('admin-auth')
@@ -102,19 +109,39 @@ export class AdminAuthController {
   }
 
   @Patch('admins/:id/deactivate')
-  @UseGuards(AdminJwtGuard)
+  @UseGuards(AdminJwtGuard, AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
   @ApiBearerAuth('jwt')
-  @ApiOperation({ summary: 'Deactivate an admin (SUPER_ADMIN only)' })
+  @ApiOperation({ summary: 'Deactivate an admin (SUPER_ADMIN or ADMIN — ADMIN limited to SUPPORT/ANALYST)' })
   deactivate(@GetAdminUser() admin: AdminUser, @Param('id') targetId: string) {
     return this.adminAuth.deactivate(admin.id, targetId);
   }
 
   @Patch('admins/:id/reactivate')
-  @UseGuards(AdminJwtGuard)
+  @UseGuards(AdminJwtGuard, AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
   @ApiBearerAuth('jwt')
-  @ApiOperation({ summary: 'Reactivate a deactivated admin (SUPER_ADMIN only)' })
+  @ApiOperation({ summary: 'Reactivate a deactivated admin (SUPER_ADMIN or ADMIN)' })
   reactivate(@GetAdminUser() admin: AdminUser, @Param('id') targetId: string) {
     return this.adminAuth.reactivate(admin.id, targetId);
+  }
+
+  @Patch('admins/:id/role')
+  @UseGuards(AdminJwtGuard, AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN')
+  @ApiBearerAuth('jwt')
+  @ApiOperation({ summary: 'Change an admin role (SUPER_ADMIN only — invalidates their sessions)' })
+  changeRole(@GetAdminUser() admin: AdminUser, @Param('id') targetId: string, @Body() dto: ChangeRoleDto) {
+    return this.adminAuth.changeRole(admin.id, targetId, dto.role);
+  }
+
+  @Post('admins/:id/resend-invite')
+  @UseGuards(AdminJwtGuard, AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiBearerAuth('jwt')
+  @ApiOperation({ summary: 'Resend invite email to an admin who has not yet accepted' })
+  resendInvite(@GetAdminUser() admin: AdminUser, @Param('id') targetId: string) {
+    return this.adminAuth.resendInvite(admin.id, targetId);
   }
 
   // ── Domain allowlist ───────────────────────────────────────────────────────
@@ -128,7 +155,8 @@ export class AdminAuthController {
   }
 
   @Post('domains')
-  @UseGuards(AdminJwtGuard)
+  @UseGuards(AdminJwtGuard, AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN')
   @ApiBearerAuth('jwt')
   @ApiOperation({ summary: 'Add an allowed admin email domain (SUPER_ADMIN only)' })
   addDomain(@Body() dto: AddDomainDto) {
@@ -136,7 +164,8 @@ export class AdminAuthController {
   }
 
   @Delete('domains/:domain')
-  @UseGuards(AdminJwtGuard)
+  @UseGuards(AdminJwtGuard, AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN')
   @ApiBearerAuth('jwt')
   @ApiOperation({ summary: 'Remove an allowed admin email domain (SUPER_ADMIN only)' })
   removeDomain(@Param('domain') domain: string) {

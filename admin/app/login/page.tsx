@@ -82,7 +82,16 @@ export default function LoginPage() {
         </form>
 
         <div style={{ marginTop: 20, padding: "10px 12px", background: "var(--surface2)", borderRadius: "var(--radius)", fontSize: 10, color: "var(--muted2)" }}>
-          This panel is for internal team use only. Access is logged.
+          This panel is for internal team use only. Access is logged and audited.
+        </div>
+
+        <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between" }}>
+          <a href="/bootstrap" style={{ fontSize: 10, color: "var(--muted)" }}>
+            First-time setup
+          </a>
+          <span style={{ fontSize: 10, color: "var(--muted)" }}>
+            Invited? Check your email for the setup link.
+          </span>
         </div>
       </div>
     </div>

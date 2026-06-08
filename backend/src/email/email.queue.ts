@@ -1,5 +1,5 @@
-export const EMAIL_QUEUE         = 'email:transactional';
-export const CAMPAIGN_EMAIL_QUEUE = 'email:marketing';
+export const EMAIL_QUEUE          = 'email-transactional';
+export const CAMPAIGN_EMAIL_QUEUE = 'email-marketing';
 
 export const EMAIL_JOB = {
   SEND:          'send',

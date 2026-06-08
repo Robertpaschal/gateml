@@ -6,11 +6,13 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsEnum, IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { Plan }          from '@prisma/client';
 import { Request }       from 'express';
-import { AdminService }  from './admin.service';
-import { AdminJwtGuard } from '../admin-auth/guards/admin-jwt.guard';
-import { GetAdminUser }  from '../admin-auth/decorators/admin-user.decorator';
-import { AuditService }  from '../audit/audit.service';
-import type { AdminUser } from '@prisma/client';
+import { AdminService }    from './admin.service';
+import { AdminJwtGuard }   from '../admin-auth/guards/admin-jwt.guard';
+import { AdminRolesGuard } from '../admin-auth/guards/admin-roles.guard';
+import { AdminRoles }      from '../admin-auth/decorators/admin-roles.decorator';
+import { GetAdminUser }    from '../admin-auth/decorators/admin-user.decorator';
+import { AuditService }    from '../audit/audit.service';
+import type { AdminUser }  from '@prisma/client';
 
 class UpdatePlanDto   { @IsEnum(Plan)              @IsNotEmpty()             plan!:    Plan;   }
 class ReplyDto         { @IsString()                @IsNotEmpty()             body!:    string; }
@@ -58,7 +60,9 @@ export class AdminController {
   }
 
   @Patch('users/:id/plan')
-  @ApiOperation({ summary: 'Override a user plan' })
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Override a user plan (SUPER_ADMIN, ADMIN)' })
   async updatePlan(
     @Param('id') id: string, @Body() body: UpdatePlanDto,
     @GetAdminUser() admin: AdminUser, @Req() req: Request,
@@ -159,7 +163,9 @@ export class AdminController {
   // ── Accounting (full) ─────────────────────────────────────────────────────
 
   @Get('accounting')
-  @ApiOperation({ summary: 'Full accounting & revenue summary' })
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN', 'ANALYST')
+  @ApiOperation({ summary: 'Full accounting & revenue summary (SUPER_ADMIN, ADMIN, ANALYST)' })
   accounting() {
     return this.admin.getFullAccounting();
   }
@@ -167,6 +173,8 @@ export class AdminController {
   // ── Audit log ──────────────────────────────────────────────────────────────
 
   @Get('audit')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN', 'ANALYST')
   @ApiOperation({ summary: 'Query audit log' })
   auditLog(
     @Query('resource')  resource?:  string,

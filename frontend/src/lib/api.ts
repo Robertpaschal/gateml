@@ -54,6 +54,26 @@ export interface BillingLimits {
   paygRateUsd: number;
 }
 
+export interface BillingProduct {
+  id:          string;
+  name:        string;
+  description: string | null;
+  stripePriceId: string;
+  planType:    "FREE" | "PRO" | "ENTERPRISE";
+  interval:    string;
+  amountCents: number;
+  currency:    string;
+  isPublic:    boolean;
+  trialDays:   number;
+}
+
+export interface BillingPublicConfig {
+  trialDays:            number;
+  paygRateFreeUsd:      number;
+  paygRateProUsd:       number;
+  managedMarkupPercent: number;
+}
+
 export interface BillingMe {
   plan: "FREE" | "PRO" | "ENTERPRISE";
   payAsYouGo: boolean;
@@ -62,6 +82,12 @@ export interface BillingMe {
   usage: { requests: number; month: string };
   managedUsage: { tokensUsed: number; costUsd: number };
   nextResetAt: string;
+  paygRateUsd: number;
+  paygRateFreeUsd: number;
+  paygRateProUsd: number;
+  managedMarkupPercent: number;
+  trialEndAt: string | null;
+  customProduct: BillingProduct | null;
   subscription: {
     status: string;
     currentPeriodEnd: string;
@@ -72,8 +98,17 @@ export interface BillingMe {
 export const billingApi = {
   me: (token: string) =>
     request<BillingMe>("/billing/me", {}, token),
-  checkout: (token: string, priceId: string) =>
-    request<{ url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ priceId }) }, token),
+  getProducts: () =>
+    request<BillingProduct[]>("/billing/products"),
+  getConfig: () =>
+    request<BillingPublicConfig>("/billing/config"),
+  validatePromo: (code: string) =>
+    request<{ valid: boolean; discountPercent?: number; reason?: string }>(`/billing/promo/validate/${encodeURIComponent(code)}`),
+  checkout: (token: string, priceId: string, promoCode?: string) =>
+    request<{ url: string }>("/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ priceId, ...(promoCode ? { promoCode } : {}) }),
+    }, token),
   portal: (token: string) =>
     request<{ url: string }>("/billing/portal", { method: "POST" }, token),
   togglePayg: (token: string, enabled: boolean) =>

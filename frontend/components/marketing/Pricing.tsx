@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { billingApi, type BillingProduct, type BillingPublicConfig } from "../../src/lib/api";
 
 const FREE_FEATURES = [
   "1,000 live requests / month",
@@ -90,7 +91,7 @@ function EnterpriseModal({ onClose }: { onClose: () => void }) {
             <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
             <div className="modal-title">Message received</div>
             <div className="modal-sub" style={{ marginBottom: 24 }}>
-              We'll reach out to <strong>{form.email}</strong> within one business day to
+              We&apos;ll reach out to <strong>{form.email}</strong> within one business day to
               discuss your use case and put together a custom quote.
             </div>
             <button className="btn btn-ghost" onClick={onClose}>Close</button>
@@ -101,7 +102,7 @@ function EnterpriseModal({ onClose }: { onClose: () => void }) {
               <div className="modal-title">Talk to us about Enterprise</div>
               <div className="modal-sub">
                 Unlimited requests, custom SLA, SSO, and dedicated support.
-                Tell us about your team and we'll follow up within one business day.
+                Tell us about your team and we&apos;ll follow up within one business day.
               </div>
             </div>
 
@@ -139,7 +140,7 @@ function EnterpriseModal({ onClose }: { onClose: () => void }) {
                 <label className="form-label">
                   Tell us about your use case
                   <span style={{ fontWeight: 400, textTransform: "none", color: "var(--muted2)", marginLeft: 4 }}>
-                    — volume, providers, what you're building
+                    — volume, providers, what you&apos;re building
                   </span>
                 </label>
                 <textarea className="field" value={form.body} onChange={e => set("body", e.target.value)}
@@ -161,11 +162,44 @@ function EnterpriseModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ── Defaults — used before the API responds or if it fails ────────────────────
+
+const DEFAULT_CONFIG: BillingPublicConfig = {
+  trialDays:            7,
+  paygRateFreeUsd:      0.002,
+  paygRateProUsd:       0.001,
+  managedMarkupPercent: 20,
+};
+
 // ── Main Pricing component ─────────────────────────────────────────────────────
 
 export function Pricing() {
-  const [annual,          setAnnual]          = useState(false);
-  const [showEnterprise,  setShowEnterprise]  = useState(false);
+  const [annual,         setAnnual]         = useState(false);
+  const [showEnterprise, setShowEnterprise] = useState(false);
+  const [products,       setProducts]       = useState<BillingProduct[]>([]);
+  const [cfg,            setCfg]            = useState<BillingPublicConfig>(DEFAULT_CONFIG);
+
+  useEffect(() => {
+    billingApi.getProducts().then(setProducts).catch(() => {});
+    billingApi.getConfig().then(setCfg).catch(() => {});
+  }, []);
+
+  const monthly = products.find(p => p.planType === "PRO" && p.interval === "month");
+  const annual_ = products.find(p => p.planType === "PRO" && p.interval === "year");
+
+  const monthlyPrice   = (monthly?.amountCents ?? 1900)  / 100;
+  const annualTotal    = (annual_?.amountCents  ?? 15200) / 100;
+  const annualPerMonth = (annualTotal / 12).toFixed(2);
+  const savings        = monthlyPrice > 0 ? Math.round((1 - (annualTotal / 12) / monthlyPrice) * 100) : 33;
+  const trialDays      = (annual ? annual_ : monthly)?.trialDays ?? cfg.trialDays;
+
+  const freeRate   = cfg.paygRateFreeUsd;
+  const proRate    = cfg.paygRateProUsd;
+  const markup     = cfg.managedMarkupPercent;
+
+  function fmtRate(r: number) {
+    return `$${r < 0.01 ? r.toFixed(4) : r.toFixed(3)}/request`;
+  }
 
   return (
     <section className="section" id="pricing" style={{ borderTop: "1px solid var(--border)" }}>
@@ -194,10 +228,12 @@ export function Pricing() {
         </button>
         <span style={{ fontSize: 12, color: annual ? "var(--text)" : "var(--muted)" }}>
           Annual
-          <span style={{
-            marginLeft: 6, background: "rgba(0,255,136,0.12)", color: "var(--accent)",
-            fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "1px solid rgba(0,255,136,0.25)",
-          }}>Save 33%</span>
+          {savings > 0 && (
+            <span style={{
+              marginLeft: 6, background: "rgba(0,255,136,0.12)", color: "var(--accent)",
+              fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "1px solid rgba(0,255,136,0.25)",
+            }}>Save {savings}%</span>
+          )}
         </span>
       </div>
 
@@ -224,17 +260,19 @@ export function Pricing() {
           <div className="pricing-name">Pro</div>
           <div className="pricing-desc">For teams running AI in production.</div>
           <div className="pricing-price">
-            {annual ? "$12.67" : "$19"}
-            <span>&nbsp;/ mo{annual ? " · billed $152/yr" : ""}</span>
+            {annual ? `$${annualPerMonth}` : `$${monthlyPrice % 1 === 0 ? monthlyPrice.toFixed(0) : monthlyPrice.toFixed(2)}`}
+            <span>&nbsp;/ mo{annual ? ` · billed $${annualTotal % 1 === 0 ? annualTotal.toFixed(0) : annualTotal.toFixed(2)}/yr` : ""}</span>
           </div>
           <ul className="pricing-features">
             {PRO_FEATURES.map(f => <li key={f}>{f}</li>)}
           </ul>
           <Link href="/auth" className="btn-primary-lg"
             style={{ width: "100%", justifyContent: "center", display: "flex" }}>
-            Start free trial
+            {trialDays > 0 ? "Start free trial" : "Get started"}
           </Link>
-          <p className="pricing-cta-note">7-day free trial · cancel anytime</p>
+          <p className="pricing-cta-note">
+            {trialDays > 0 ? `${trialDays}-day free trial · ` : ""}cancel anytime
+          </p>
         </div>
 
         {/* Enterprise */}
@@ -271,7 +309,7 @@ export function Pricing() {
           }}>Managed Keys</span>
           <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
             Don&apos;t want to manage provider API keys? Enable <strong style={{ color: "var(--text)" }}>GateML Managed Keys</strong> — GateML
-            routes through its own provider accounts and bills you per-token at provider cost + 20% markup.
+            routes through its own provider accounts and bills you per-token at provider cost + {markup}% markup.
             Available on all plans, no credit card required to start.
           </span>
         </div>
@@ -287,8 +325,8 @@ export function Pricing() {
           }}>Pay-as-you-go</span>
           <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
             Hit your monthly limit? Enable pay-as-you-go and keep going at{" "}
-            <strong style={{ color: "var(--text)" }}>$0.002/request</strong> (Starter) or{" "}
-            <strong style={{ color: "var(--text)" }}>$0.001/request</strong> (Pro) — billed monthly,
+            <strong style={{ color: "var(--text)" }}>{fmtRate(freeRate)}</strong> (Starter) or{" "}
+            <strong style={{ color: "var(--text)" }}>{fmtRate(proRate)}</strong> (Pro) — billed monthly,
             no upfront commitment.
           </span>
         </div>

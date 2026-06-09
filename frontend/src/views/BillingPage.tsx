@@ -3,14 +3,9 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { billingApi } from "../lib/api";
 import { useToken }   from "../hooks/useToken";
-import type { BillingMe } from "../lib/api";
+import type { BillingMe, BillingProduct } from "../lib/api";
 import Link from "next/link";
 import { Check, X } from "lucide-react";
-
-const PRICE_IDS = {
-  PRO_MONTHLY: process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY ?? "",
-  PRO_ANNUAL:  process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_ANNUAL  ?? "",
-};
 
 function pct(used: number, limit: number) {
   if (limit === -1) return 0;
@@ -25,18 +20,96 @@ function fmtTokens(n: number): string {
   return n.toLocaleString();
 }
 
+function fmtRate(rate: number) {
+  return rate === 0 ? "—" : `$${rate.toFixed(rate < 0.01 ? 4 : 2)}/req`;
+}
+
+// ── Promo code input ──────────────────────────────────────────────────────────
+
+function PromoInput({ onApply }: { onApply: (code: string, discount: number) => void }) {
+  const [code,    setCode]    = useState("");
+  const [status,  setStatus]  = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  const [message, setMessage] = useState("");
+
+  async function check() {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) return;
+    setStatus("checking");
+    try {
+      const res = await billingApi.validatePromo(trimmed);
+      if (res.valid && res.discountPercent) {
+        setStatus("valid");
+        setMessage(`${res.discountPercent}% off applied`);
+        onApply(trimmed, res.discountPercent);
+      } else {
+        setStatus("invalid");
+        setMessage(res.reason ?? "Invalid code");
+      }
+    } catch {
+      setStatus("invalid");
+      setMessage("Could not validate code");
+    }
+  }
+
+  function clear() {
+    setCode(""); setStatus("idle"); setMessage("");
+    onApply("", 0);
+  }
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>Have a promo code?</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          value={code}
+          onChange={e => { setCode(e.target.value.toUpperCase()); if (status !== "idle") { setStatus("idle"); setMessage(""); } }}
+          onKeyDown={e => e.key === "Enter" && check()}
+          placeholder="LAUNCH20"
+          style={{ fontFamily: "monospace", fontSize: 12, padding: "7px 10px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text)", width: 140 }}
+          disabled={status === "valid"}
+        />
+        {status !== "valid" ? (
+          <button
+            onClick={check}
+            disabled={status === "checking" || !code.trim()}
+            style={{ fontSize: 11, padding: "7px 14px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text)", cursor: "pointer" }}
+          >
+            {status === "checking" ? "Checking…" : "Apply"}
+          </button>
+        ) : (
+          <button onClick={clear} style={{ fontSize: 11, padding: "7px 10px", borderRadius: 5, border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}>
+            Remove
+          </button>
+        )}
+        {message && (
+          <span style={{ fontSize: 11, color: status === "valid" ? "var(--accent)" : "var(--danger)" }}>
+            {status === "valid" ? "✓ " : ""}{message}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export function BillingPage() {
   const token        = useToken();
   const searchParams = useSearchParams();
-  const [data,    setData]    = useState<BillingMe | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [annual,  setAnnual]  = useState(false);
-  const [busy,    setBusy]    = useState(false);
-  const [notice,  setNotice]  = useState<string | null>(null);
+  const [data,      setData]      = useState<BillingMe | null>(null);
+  const [products,  setProducts]  = useState<BillingProduct[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [annual,    setAnnual]    = useState(false);
+  const [busy,      setBusy]      = useState(false);
+  const [notice,    setNotice]    = useState<string | null>(null);
+  const [promoCode, setPromoCode] = useState("");
 
   useEffect(() => {
     if (searchParams?.get("success") === "1") setNotice("🎉 Your plan has been upgraded. Welcome to Pro!");
     if (searchParams?.get("canceled") === "1") setNotice("Checkout canceled — no changes made.");
+    // Pre-fill promo code from campaign link (?promo=CODE)
+    const p = searchParams?.get("promo");
+    if (p) setPromoCode(p.toUpperCase());
   }, [searchParams]);
 
   useEffect(() => {
@@ -44,11 +117,22 @@ export function BillingPage() {
     billingApi.me(token).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
   }, [token]);
 
+  useEffect(() => {
+    billingApi.getProducts().then(setProducts).catch(() => {
+      const monthly = process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY;
+      const annual  = process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_ANNUAL;
+      const fb: BillingProduct[] = [];
+      if (monthly) fb.push({ id: "monthly", name: "GateML Pro",        description: null, stripePriceId: monthly, planType: "PRO", interval: "month", amountCents: 1900,  currency: "usd", isPublic: true, trialDays: 7 });
+      if (annual)  fb.push({ id: "annual",  name: "GateML Pro Annual", description: null, stripePriceId: annual,  planType: "PRO", interval: "year",  amountCents: 15200, currency: "usd", isPublic: true, trialDays: 7 });
+      setProducts(fb);
+    });
+  }, []);
+
   const upgrade = async (priceId: string) => {
     if (!token || !priceId || busy) return;
     setBusy(true);
     try {
-      const { url } = await billingApi.checkout(token, priceId);
+      const { url } = await billingApi.checkout(token, priceId, promoCode || undefined);
       if (url) window.location.href = url;
     } catch { setBusy(false); }
   };
@@ -89,6 +173,25 @@ export function BillingPage() {
   const nextReset = new Date(data.nextResetAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const hasManagedUsage = data.useManaged || (data.managedUsage?.tokensUsed ?? 0) > 0;
 
+  const monthlyProduct  = products.find(p => p.planType === "PRO" && p.interval === "month");
+  const annualProduct   = products.find(p => p.planType === "PRO" && p.interval === "year");
+  const selectedProduct = annual ? annualProduct : monthlyProduct;
+  const monthlyPrice    = (monthlyProduct?.amountCents ?? 1900)  / 100;
+  const annualPrice     = (annualProduct?.amountCents  ?? 15200) / 100;
+  const annualPerMonth  = (annualPrice / 12).toFixed(2);
+  const savings         = monthlyPrice > 0 ? Math.round((1 - (annualPrice / 12) / monthlyPrice) * 100) : 33;
+  const trialDays       = selectedProduct?.trialDays ?? 7;
+
+  const customProduct  = data.customProduct;
+  const showCustom     = !!customProduct && data.plan !== customProduct.planType;
+  const showProUpgrade = !isPro && !isEnt && !showCustom;
+
+  // Use DB-sourced rates for display (fall back to plan limits as last resort)
+  const myPaygRate  = data.paygRateUsd;
+  const freeRate    = data.paygRateFreeUsd ?? 0.002;
+  const proRate     = data.paygRateProUsd  ?? 0.001;
+  const markup      = data.managedMarkupPercent ?? 20;
+
   return (
     <div className="fade-in" style={{ maxWidth: 720 }}>
       {notice && (
@@ -121,6 +224,17 @@ export function BillingPage() {
           </div>
         </div>
 
+        {/* Trial banner */}
+        {data.trialEndAt && new Date(data.trialEndAt) > new Date() && (
+          <div style={{
+            marginTop: 12, padding: "8px 12px", borderRadius: 6,
+            background: "rgba(0,255,136,0.08)", border: "1px solid rgba(0,255,136,0.2)",
+            fontSize: 11, color: "var(--accent)",
+          }}>
+            Free trial active — ends {new Date(data.trialEndAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+          </div>
+        )}
+
         {/* Request usage meter */}
         {!isEnt && (
           <div style={{ marginTop: 16 }}>
@@ -151,7 +265,7 @@ export function BillingPage() {
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Pay-as-you-go</div>
               <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                Continue beyond your quota at ${data.limits.paygRateUsd.toFixed(3)}/request
+                Continue beyond your quota at {fmtRate(myPaygRate)}
               </div>
             </div>
             <Toggle enabled={data.payAsYouGo} onChange={togglePayg} />
@@ -172,7 +286,7 @@ export function BillingPage() {
         )}
       </div>
 
-      {/* Managed Keys usage card — shown when managed mode is on or there's usage this month */}
+      {/* Managed Keys usage card */}
       {hasManagedUsage && (
         <div className="card" style={{
           marginBottom: 20,
@@ -189,7 +303,7 @@ export function BillingPage() {
                   border: "1px solid rgba(0,201,255,0.25)", borderRadius: 4, padding: "1px 6px",
                 }}>{data.useManaged ? "ACTIVE" : "INACTIVE"}</span>
               </div>
-              <div className="card-sub">Token-based billing at provider cost + 20% markup</div>
+              <div className="card-sub">Token-based billing at provider cost + {markup}% markup</div>
             </div>
           </div>
 
@@ -238,7 +352,7 @@ export function BillingPage() {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--accent2)", marginBottom: 3 }}>GateML Managed Keys</div>
             <div style={{ fontSize: 11, color: "var(--muted)" }}>
-              Skip provider key setup entirely. Enable in Gateway → Provider Keys to route through GateML&apos;s keys at cost + 20% markup.
+              Skip provider key setup entirely. Enable in Gateway → Provider Keys to route through GateML&apos;s keys at cost + {markup}% markup.
             </div>
           </div>
           <Link
@@ -254,8 +368,56 @@ export function BillingPage() {
         </div>
       )}
 
-      {/* Upgrade section — hidden for Pro/Enterprise */}
-      {!isPro && !isEnt && (
+      {/* Custom plan upgrade */}
+      {showCustom && customProduct && (
+        <div className="card" style={{ marginBottom: 20, borderColor: "rgba(0,201,255,0.3)", background: "rgba(0,201,255,0.03)" }}>
+          <div className="card-header">
+            <div>
+              <div className="card-title">{customProduct.name}</div>
+              <div className="card-sub">Custom plan — prepared for your account</div>
+            </div>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+              background: "rgba(0,201,255,0.12)", color: "var(--accent2)",
+              border: "1px solid rgba(0,201,255,0.25)", borderRadius: 4, padding: "2px 7px",
+            }}>CUSTOM</span>
+          </div>
+
+          {customProduct.description && (
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: "10px 0 0" }}>{customProduct.description}</p>
+          )}
+
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, margin: "16px 0" }}>
+            <span style={{ fontFamily: "var(--font-ui)", fontSize: 32, fontWeight: 800, color: "var(--accent2)" }}>
+              ${(customProduct.amountCents / 100).toFixed(2)}
+            </span>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              / {customProduct.interval === "year" ? "yr" : "mo"} · {customProduct.currency.toUpperCase()}
+            </span>
+          </div>
+
+          <button
+            onClick={() => upgrade(customProduct.stripePriceId)}
+            disabled={busy}
+            style={{
+              padding: "10px 24px", borderRadius: 6,
+              background: "var(--accent2)", color: "#000", border: "none",
+              fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13,
+              cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+            }}
+          >
+            {busy ? "Redirecting…" : `Upgrade to ${customProduct.name}`}
+          </button>
+          {customProduct.trialDays > 0 && (
+            <p style={{ fontSize: 10, color: "var(--muted2)", marginTop: 8 }}>
+              {customProduct.trialDays}-day free trial · cancel anytime · secured by Stripe
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Standard Pro upgrade */}
+      {showProUpgrade && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header">
             <div className="card-title">Upgrade to Pro</div>
@@ -270,16 +432,16 @@ export function BillingPage() {
               <span style={{ position: "absolute", top: 2, left: annual ? 19 : 2, width: 16, height: 16, borderRadius: "50%", background: "#000", transition: "left 0.2s" }} />
             </button>
             <span style={{ fontSize: 12, color: annual ? "var(--text)" : "var(--muted)" }}>
-              Annual <span style={{ fontSize: 10, color: "var(--accent2)" }}>Save 33%</span>
+              Annual {savings > 0 && <span style={{ fontSize: 10, color: "var(--accent2)" }}>Save {savings}%</span>}
             </span>
           </div>
 
           <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 16 }}>
             <span style={{ fontFamily: "var(--font-ui)", fontSize: 32, fontWeight: 800, color: "var(--accent)" }}>
-              {annual ? "$12.67" : "$19"}
+              ${annual ? annualPerMonth : monthlyPrice.toFixed(0)}
             </span>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              / mo{annual ? " · $152 billed annually" : ""}
+              / mo{annual ? ` · $${annualPrice.toFixed(0)} billed annually` : ""}
             </span>
           </div>
 
@@ -296,20 +458,23 @@ export function BillingPage() {
             ["Email support",                        true],
           ]} />
 
+          <PromoInput onApply={(code, _discount) => setPromoCode(code)} />
+
           <button
-            onClick={() => upgrade(annual ? PRICE_IDS.PRO_ANNUAL : PRICE_IDS.PRO_MONTHLY)}
-            disabled={busy}
+            onClick={() => upgrade(selectedProduct?.stripePriceId ?? "")}
+            disabled={busy || !selectedProduct}
             style={{
               marginTop: 20, padding: "10px 24px", borderRadius: 6,
               background: "var(--accent)", color: "#000", border: "none",
               fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13,
-              cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+              cursor: (busy || !selectedProduct) ? "not-allowed" : "pointer",
+              opacity: (busy || !selectedProduct) ? 0.6 : 1,
             }}
           >
-            {busy ? "Redirecting…" : "Upgrade to Pro"}
+            {busy ? "Redirecting…" : trialDays > 0 ? `Start ${trialDays}-day free trial` : "Upgrade to Pro"}
           </button>
           <p style={{ fontSize: 10, color: "var(--muted2)", marginTop: 8 }}>
-            7-day free trial · cancel anytime · secured by Stripe
+            {trialDays > 0 ? `${trialDays}-day free trial · ` : ""}cancel anytime · secured by Stripe
           </p>
         </div>
       )}
@@ -327,16 +492,16 @@ export function BillingPage() {
           </thead>
           <tbody>
             {[
-              ["Live requests / month",       "1,000",      "30,000"],
-              ["Test requests",               "Unlimited",  "Unlimited"],
-              ["GateML Managed Keys",         "✓",          "✓"],
-              ["API key pairs",               "1",          "5"],
-              ["Log retention",               "7 days",     "90 days"],
-              ["Prompts",                     "1",          "Unlimited"],
-              ["Prompt versioning",           "✗",          "✓"],
-              ["Fallback chain",              "✗",          "✓"],
-              ["Eval testing",                "✗",          "✓"],
-              ["Pay-as-you-go",               "$0.002/req", "$0.001/req"],
+              ["Live requests / month",  "1,000",               "30,000"],
+              ["Test requests",          "Unlimited",           "Unlimited"],
+              ["GateML Managed Keys",    "✓",                   "✓"],
+              ["API key pairs",          "1",                   "5"],
+              ["Log retention",          "7 days",              "90 days"],
+              ["Prompts",                "1",                   "Unlimited"],
+              ["Prompt versioning",      "✗",                   "✓"],
+              ["Fallback chain",         "✗",                   "✓"],
+              ["Eval testing",           "✗",                   "✓"],
+              ["Pay-as-you-go",          fmtRate(freeRate),     fmtRate(proRate)],
             ].map(([label, free, pro]) => (
               <tr key={label}>
                 <td>{label}</td>

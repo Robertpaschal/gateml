@@ -1,9 +1,9 @@
 import {
-  Controller, Get, Post, Body, UseGuards,
+  Controller, Get, Post, Body, UseGuards, Param,
   Headers, RawBodyRequest, Req, HttpCode,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsBoolean, IsNotEmpty } from 'class-validator';
+import { IsString, IsBoolean, IsNotEmpty, IsOptional } from 'class-validator';
 import { Request }        from 'express';
 import { BillingService } from './billing.service';
 import { JwtAuthGuard }   from '../auth/guards/jwt-auth.guard';
@@ -14,6 +14,9 @@ import { ConfigService }  from '@nestjs/config';
 class CheckoutDto {
   @IsString() @IsNotEmpty()
   priceId!: string;
+
+  @IsString() @IsOptional()
+  promoCode?: string;
 }
 
 class TogglePaygDto {
@@ -34,6 +37,24 @@ export class BillingController {
     private readonly config:  ConfigService,
   ) {}
 
+  @Get('products')
+  @ApiOperation({ summary: 'List public billing products (no auth required)' })
+  getProducts() {
+    return this.billing.getProducts();
+  }
+
+  @Get('config')
+  @ApiOperation({ summary: 'Get public billing config — trial days, PAYG rates, managed markup (no auth required)' })
+  getConfig() {
+    return this.billing.getPublicConfig();
+  }
+
+  @Get('promo/validate/:code')
+  @ApiOperation({ summary: 'Validate a promo code — returns discount % if valid (no auth required)' })
+  validatePromo(@Param('code') code: string) {
+    return this.billing.validatePromo(code);
+  }
+
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('jwt')
@@ -53,6 +74,7 @@ export class BillingController {
       body.priceId,
       `${appUrl}/dashboard/billing?success=1`,
       `${appUrl}/dashboard/billing?canceled=1`,
+      body.promoCode,
     );
   }
 

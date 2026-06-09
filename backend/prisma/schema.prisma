@@ -58,12 +58,14 @@ model AdminUser {
   updatedAt     DateTime  @updatedAt
   lastLoginAt   DateTime?
 
-  invitedByAdmin AdminUser?  @relation("AdminInvites", fields: [invitedBy], references: [id])
-  invitees       AdminUser[] @relation("AdminInvites")
-  auditLogs      AuditLog[]
-  notes          AdminNote[]
-  campaigns      Campaign[]
-  promoCodes     PromoCode[]
+  invitedByAdmin      AdminUser?             @relation("AdminInvites", fields: [invitedBy], references: [id])
+  invitees            AdminUser[]            @relation("AdminInvites")
+  auditLogs           AuditLog[]
+  notes               AdminNote[]
+  campaigns           Campaign[]
+  promoCodes          PromoCode[]
+  billingProducts     BillingProduct[]       @relation("BillingProductCreator")
+  customAssignments   CustomPlanAssignment[] @relation("CustomAssignmentCreator")
 }
 
 // ── Admin domain allowlist ────────────────────────────────────────────────────
@@ -152,19 +154,20 @@ model Campaign {
 // ── Promo Codes ───────────────────────────────────────────────────────────────
 
 model PromoCode {
-  id              String    @id @default(cuid())
-  code            String    @unique
-  description     String?
-  discountPercent Int
-  stripeCouponId  String?
-  maxUses         Int?
-  usedCount       Int       @default(0)
-  validFrom       DateTime  @default(now())
-  validUntil      DateTime?
-  isActive        Boolean   @default(true)
-  createdBy       String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  code                  String    @unique
+  description           String?
+  discountPercent       Int
+  stripeCouponId        String?   // Stripe coupon ID (the discount rule)
+  stripePromotionCodeId String?   // Stripe promotion code ID (what users type at checkout)
+  maxUses               Int?
+  usedCount             Int       @default(0)
+  validFrom             DateTime  @default(now())
+  validUntil            DateTime?
+  isActive              Boolean   @default(true)
+  createdBy             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   admin AdminUser? @relation(fields: [createdBy], references: [id])
 
@@ -195,14 +198,15 @@ model User {
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
-  apiKeys         ApiKey[]
-  providerKeys    ProviderKey[]
-  requestLogs     RequestLog[]
-  prompts         Prompt[]
-  subscription    Subscription?
-  usageRecords    UsageRecord[]
-  contactMessages ContactMessage[]
-  adminNotes      AdminNote[]
+  apiKeys          ApiKey[]
+  providerKeys     ProviderKey[]
+  requestLogs      RequestLog[]
+  prompts          Prompt[]
+  subscription     Subscription?
+  usageRecords     UsageRecord[]
+  contactMessages  ContactMessage[]
+  adminNotes       AdminNote[]
+  customAssignment CustomPlanAssignment?
 }
 
 // ── Support Messages ──────────────────────────────────────────────────────────
@@ -230,33 +234,89 @@ model ContactMessage {
 // ── Billing ───────────────────────────────────────────────────────────────────
 
 model Subscription {
-  id                 String   @id @default(cuid())
-  userId             String   @unique
-  stripeSubId        String   @unique
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  stripeSubId        String    @unique
   stripePriceId      String
-  status             String   // "active" | "past_due" | "canceled" | "trialing"
+  status             String    // "active" | "past_due" | "canceled" | "trialing"
   currentPeriodStart DateTime
   currentPeriodEnd   DateTime
-  cancelAtPeriodEnd  Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  cancelAtPeriodEnd  Boolean   @default(false)
+  trialEndAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UsageRecord {
-  id        String   @id @default(cuid())
+  id             String   @id @default(cuid())
   userId         String
   month          String   // "2026-06" — calendar month bucket
   requests       Int      @default(0)
   tokensUsed     Int      @default(0)
   managedCostUsd Float    @default(0)
+  paygRequests   Int      @default(0)
+  paygBilled     Int      @default(0)
+  managedBilled  Float    @default(0)
   updatedAt      DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, month])
   @@index([userId])
+}
+
+// ── Billing configuration (singleton) ────────────────────────────────────────
+
+model BillingConfig {
+  id                   String   @id @default("global")
+  trialDays            Int      @default(7)
+  paygRateProUsd       Float    @default(0.001)
+  paygRateFreeUsd      Float    @default(0.002)
+  managedMarkupPercent Int      @default(20)
+  updatedAt            DateTime @updatedAt
+}
+
+// ── Billing products (Stripe price catalog) ───────────────────────────────────
+
+model BillingProduct {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  stripeProductId String?
+  stripePriceId   String   @unique
+  planType        Plan     @default(PRO)
+  interval        String   @default("month")
+  amountCents     Int
+  currency        String   @default("usd")
+  isPublic        Boolean  @default(true)
+  isActive        Boolean  @default(true)
+  trialDays       Int?
+  notes           String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  createdByAdmin    AdminUser?           @relation("BillingProductCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  customAssignments CustomPlanAssignment[]
+
+  @@index([isActive, isPublic])
+}
+
+// ── Custom plan assignments (per-user overrides) ──────────────────────────────
+
+model CustomPlanAssignment {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  productId String
+  notes     String?
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   BillingProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdByAdmin AdminUser? @relation("CustomAssignmentCreator", fields: [createdBy], references: [id], onDelete: SetNull)
 }
 
 // ── API Keys ─────────────────────────────────────────────────────────────────

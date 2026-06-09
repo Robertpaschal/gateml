@@ -264,6 +264,80 @@ export const adminsApi = {
     req<{ message: string }>(`/admin/auth/admins/${id}/resend-invite`, { method: "POST" }, token),
 };
 
+// ── Billing config ────────────────────────────────────────────────────────────
+
+export interface BillingConfig {
+  id:                   string;
+  trialDays:            number;
+  paygRateProUsd:       number;
+  paygRateFreeUsd:      number;
+  managedMarkupPercent: number;
+  updatedAt:            string;
+}
+
+export const billingConfigApi = {
+  get:    (token: string) =>
+    req<BillingConfig>("/admin/billing/config", {}, token),
+  update: (token: string, data: Partial<Omit<BillingConfig, "id" | "updatedAt">>) =>
+    req<BillingConfig>("/admin/billing/config", { method: "PATCH", body: JSON.stringify(data) }, token),
+};
+
+// ── Billing products ──────────────────────────────────────────────────────────
+
+export interface AdminBillingProduct {
+  id:              string;
+  name:            string;
+  description:     string | null;
+  stripeProductId: string | null;
+  stripePriceId:   string;
+  planType:        string;
+  interval:        string;
+  amountCents:     number;
+  currency:        string;
+  isPublic:        boolean;
+  isActive:        boolean;
+  trialDays:       number | null;
+  notes:           string | null;
+  createdAt:       string;
+  updatedAt:       string;
+  _count:          { customAssignments: number };
+}
+
+export const billingProductsApi = {
+  list:   (token: string) =>
+    req<AdminBillingProduct[]>("/admin/billing/products", {}, token),
+  create: (token: string, data: {
+    name: string; description?: string;
+    stripePriceId?: string;   // omit to auto-create in Stripe
+    planType?: string; interval?: string; amountCents: number; currency?: string;
+    isPublic?: boolean; isActive?: boolean; trialDays?: number; notes?: string;
+  }) =>
+    req<AdminBillingProduct>("/admin/billing/products", { method: "POST", body: JSON.stringify(data) }, token),
+  toggle: (token: string, id: string, isActive: boolean) =>
+    req<AdminBillingProduct>(`/admin/billing/products/${id}/toggle`, { method: "PATCH", body: JSON.stringify({ isActive }) }, token),
+};
+
+// ── Custom plan assignments ────────────────────────────────────────────────────
+
+export interface CustomPlanAssignment {
+  id:        string;
+  userId:    string;
+  productId: string;
+  notes:     string | null;
+  createdAt: string;
+  user:      { id: string; email: string; name: string | null };
+  product:   AdminBillingProduct;
+}
+
+export const customPlansApi = {
+  list:   (token: string) =>
+    req<CustomPlanAssignment[]>("/admin/billing/assignments", {}, token),
+  assign: (token: string, data: { userId: string; productId: string; notes?: string }) =>
+    req<CustomPlanAssignment>("/admin/billing/assignments", { method: "POST", body: JSON.stringify(data) }, token),
+  remove: (token: string, userId: string) =>
+    req<void>(`/admin/billing/assignments/${userId}`, { method: "DELETE" }, token),
+};
+
 // ── Domain allowlist ──────────────────────────────────────────────────────────
 
 export interface DomainEntry {

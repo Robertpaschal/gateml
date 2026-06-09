@@ -7,7 +7,15 @@
     "dev:frontend": "npm -w frontend run dev",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\""
   },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "overrides": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }

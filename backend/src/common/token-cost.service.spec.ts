@@ -11,9 +11,9 @@ describe('TokenCostService', () => {
     service = module.get<TokenCostService>(TokenCostService);
   });
 
-  describe('getManagedMarkup', () => {
+  describe('getDefaultMarkup', () => {
     it('returns 0.20 (20%)', () => {
-      expect(service.getManagedMarkup()).toBe(0.20);
+      expect(service.getDefaultMarkup()).toBe(0.20);
     });
   });
 

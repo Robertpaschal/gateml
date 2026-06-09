@@ -61,14 +61,15 @@ export class GatewayService {
     }
 
     // ── Quota check (also returns useManaged flag — avoids a second DB hit) ──
-    const { useManaged } = await this.billing.checkQuota(ctx.userId);
-    void this.billing.incrementUsage(ctx.userId);
+    const { useManaged, isPaygOverage } = await this.billing.checkQuota(ctx.userId);
+    void this.billing.incrementUsage(ctx.userId, isPaygOverage);
 
     // ── Live mode: route + fallback ───────────────────────────────────────────
     const chain = await this.routing.getFallbackChain(ctx.userId);
 
     // Track managed-key usage across all fallback attempts
-    let managedTokensUsed = 0;
+    const markupFactor     = await this.billing.getManagedMarkupFactor();
+    let managedTokensUsed  = 0;
     let managedCostAccrued = 0;
 
     const result = await this.fallback.execute(model, chain, async (m) => {
@@ -105,7 +106,7 @@ export class GatewayService {
       if (isManagedCall && callResult.status < 400) {
         const tokens = callResult.promptTokens + callResult.completionTokens;
         managedTokensUsed   += tokens;
-        managedCostAccrued  += this.cost.calculateManaged(m, callResult.promptTokens, callResult.completionTokens);
+        managedCostAccrued  += this.cost.calculateManaged(m, callResult.promptTokens, callResult.completionTokens, markupFactor);
       }
 
       return callResult;

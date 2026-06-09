@@ -28,6 +28,8 @@ const NAV: NavEntry[] = [
   { href: "/dashboard/users",        label: "Users",       icon: "⊞" },
   { href: "/dashboard/messages",     label: "Support",     icon: "◻", minRole: "SUPPORT" },
   { href: "/dashboard/audit",        label: "Audit Log",   icon: "◫", minRole: "ANALYST" },
+  { group: "Billing" },
+  { href: "/dashboard/pricing",      label: "Pricing",     icon: "◈", minRole: "ADMIN" },
   { group: "Marketing" },
   { href: "/dashboard/campaigns",    label: "Campaigns",   icon: "◧", minRole: "ADMIN" },
   { href: "/dashboard/promos",       label: "Promo Codes", icon: "◩", minRole: "ADMIN" },

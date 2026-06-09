@@ -37,33 +37,50 @@ export class PromosService {
       throw new BadRequestException('Discount must be between 1 and 100.');
     }
 
-    // Create matching Stripe coupon for checkout integration
-    let stripeCouponId: string | undefined;
+    let stripeCouponId:        string | undefined;
+    let stripePromotionCodeId: string | undefined;
+
     if (this.stripe) {
       try {
+        // Step 1: Create the underlying Coupon (discount rule)
         const coupon = await this.stripe.coupons.create({
-          id:                 `gml_${code}`,
-          percent_off:        data.discountPercent,
-          duration:           'once',
-          name:               `GateML ${code} — ${data.discountPercent}% off`,
-          max_redemptions:    data.maxUses,
-          redeem_by:          data.validUntil ? Math.floor(data.validUntil.getTime() / 1000) : undefined,
+          id:             `gml_${code}`,
+          percent_off:    data.discountPercent,
+          duration:       'once',
+          name:           `GateML ${code} — ${data.discountPercent}% off`,
+          max_redemptions: data.maxUses,
+          redeem_by:       data.validUntil ? Math.floor(data.validUntil.getTime() / 1000) : undefined,
         });
         stripeCouponId = coupon.id;
+
+        // Step 2: Create a PromotionCode so users can type it at Stripe Checkout.
+        // allow_promotion_codes=true in the checkout session looks up PromotionCode objects,
+        // NOT raw coupons. Both objects are needed.
+        // This API version uses `promotion: { type: 'coupon', coupon: id }` instead of
+        // a top-level `coupon` field.
+        const promotionCode = await this.stripe.promotionCodes.create({
+          promotion:       { type: 'coupon', coupon: coupon.id },
+          code,
+          max_redemptions: data.maxUses,
+          expires_at:      data.validUntil ? Math.floor(data.validUntil.getTime() / 1000) : undefined,
+        });
+        stripePromotionCodeId = promotionCode.id;
       } catch (err) {
-        this.logger.warn(`Stripe coupon creation failed for ${code}: ${err} — promo stored locally only`);
+        this.logger.warn(`Stripe promo creation failed for ${code}: ${err} — promo stored locally only`);
       }
     }
 
     return this.prisma.promoCode.create({
       data: {
-        code, description: data.description,
-        discountPercent: data.discountPercent,
+        code,
+        description:          data.description,
+        discountPercent:      data.discountPercent,
         stripeCouponId,
-        maxUses:     data.maxUses,
-        validUntil:  data.validUntil,
-        createdBy:   data.createdBy,
-        updatedAt:   new Date(),
+        stripePromotionCodeId,
+        maxUses:              data.maxUses,
+        validUntil:           data.validUntil,
+        createdBy:            data.createdBy,
+        updatedAt:            new Date(),
       },
     });
   }
@@ -94,14 +111,14 @@ export class PromosService {
     const promo = await this.prisma.promoCode.findUnique({ where: { id } });
     if (!promo) throw new NotFoundException('Promo code not found.');
 
-    // Mirror to Stripe
-    if (this.stripe && promo.stripeCouponId) {
+    // Toggle the PromotionCode's active flag — this prevents/allows user-entered codes
+    // at checkout without destroying the underlying coupon (which is irreversible).
+    if (this.stripe && promo.stripePromotionCodeId) {
       try {
-        if (!isActive) {
-          // Stripe doesn't have disable — delete the coupon to prevent new use
-          await this.stripe.coupons.del(promo.stripeCouponId).catch(() => {});
-        }
-      } catch { /* non-fatal */ }
+        await this.stripe.promotionCodes.update(promo.stripePromotionCodeId, { active: isActive });
+      } catch (err) {
+        this.logger.warn(`Stripe promotion code toggle failed for ${promo.code}: ${err}`);
+      }
     }
 
     return this.prisma.promoCode.update({
@@ -110,24 +127,31 @@ export class PromosService {
     });
   }
 
-  /** Validate a code at checkout time (does not increment usedCount — call recordUse after success). */
-  async validate(code: string): Promise<{ valid: boolean; discountPercent: number; stripeCouponId: string | null; reason?: string }> {
-    const promo = await this.prisma.promoCode.findUnique({ where: { code: code.toUpperCase().trim() } });
+  /** Validate a code (does not increment usedCount — that happens on invoice.payment_succeeded). */
+  async validate(code: string): Promise<{
+    valid: boolean;
+    discountPercent: number;
+    stripeCouponId: string | null;
+    reason?: string;
+  }> {
+    const promo = await this.prisma.promoCode.findUnique({
+      where: { code: code.toUpperCase().trim() },
+    });
 
     if (!promo)          return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code not found.' };
     if (!promo.isActive) return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code is inactive.' };
 
     const now = new Date();
-    if (promo.validFrom  > now)                              return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code not yet valid.' };
-    if (promo.validUntil && promo.validUntil < now)          return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code has expired.' };
-    if (promo.maxUses   !== null && promo.usedCount >= promo.maxUses!) return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code has reached its usage limit.' };
+    if (promo.validFrom  > now)                                         return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code not yet valid.' };
+    if (promo.validUntil && promo.validUntil < now)                     return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code has expired.' };
+    if (promo.maxUses !== null && promo.usedCount >= promo.maxUses!)    return { valid: false, discountPercent: 0, stripeCouponId: null, reason: 'Code has reached its usage limit.' };
 
     return { valid: true, discountPercent: promo.discountPercent, stripeCouponId: promo.stripeCouponId };
   }
 
-  async recordUse(code: string) {
-    await this.prisma.promoCode.update({
-      where: { code: code.toUpperCase().trim() },
+  async recordUse(stripeCouponId: string) {
+    await this.prisma.promoCode.updateMany({
+      where: { stripeCouponId, isActive: true },
       data:  { usedCount: { increment: 1 }, updatedAt: new Date() },
     });
   }

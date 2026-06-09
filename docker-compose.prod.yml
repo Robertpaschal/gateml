@@ -1,0 +1,110 @@
+# ─── GateML — Production Docker Compose ────────────────────────────────────────
+# Usage:
+#   docker compose -f docker-compose.prod.yml up --build -d
+#   docker compose -f docker-compose.prod.yml logs -f backend
+#   docker compose -f docker-compose.prod.yml down
+#
+# Secrets: set via env vars on the host or export from a secrets manager.
+# The backend reads ./backend/.env; override any value with the environment: block.
+# The frontend reads ./frontend/.env.local for NEXT_PUBLIC_* vars at build time.
+#
+# Stripe webhook: point your Stripe Dashboard webhook to:
+#   https://<your-api-domain>/billing/webhook
+# Required events: customer.subscription.created, customer.subscription.updated,
+#   customer.subscription.deleted, invoice.payment_succeeded, invoice.upcoming
+
+services:
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --save 60 1000
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-gateml}
+      POSTGRES_USER:     ${POSTGRES_USER:-gateml}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gateml}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── NestJS Backend ──────────────────────────────────────────────────────────
+  # CMD in Dockerfile runs: npx prisma migrate deploy && node dist/main
+  backend:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+      target:     runner
+    restart: always
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV:           production
+      DATABASE_URL:       postgresql://${POSTGRES_USER:-gateml}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gateml}
+      REDIS_URL:          redis://redis:6379
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ── Next.js Frontend ────────────────────────────────────────────────────────
+  # NEXT_PUBLIC_* vars are baked in at build time — rebuild image to update them.
+  frontend:
+    build:
+      context:    ./frontend
+      dockerfile: Dockerfile
+      target:     runner
+    restart: always
+    env_file: ./frontend/.env.local
+    environment:
+      NODE_ENV:         production
+      INTERNAL_API_URL: http://backend:3001   # server-side rewrites in next.config.ts
+    ports:
+      - "3000:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ── Admin Panel ──────────────────────────────────────────────────────────────
+  admin:
+    build:
+      context:    ./admin
+      dockerfile: Dockerfile
+      target:     runner
+    restart: always
+    environment:
+      NODE_ENV:    production
+      BACKEND_URL: http://backend:3001
+    ports:
+      - "3002:3002"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

@@ -3,10 +3,11 @@ import {
   UseGuards, ParseIntPipe, DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsEnum, IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsEnum, IsString, IsBoolean, IsNumber, IsInt, IsNotEmpty, IsOptional } from 'class-validator';
 import { Plan }          from '@prisma/client';
 import { Request }       from 'express';
 import { AdminService }    from './admin.service';
+import { BillingService, CreateBillingProductInput } from '../billing/billing.service';
 import { AdminJwtGuard }   from '../admin-auth/guards/admin-jwt.guard';
 import { AdminRolesGuard } from '../admin-auth/guards/admin-roles.guard';
 import { AdminRoles }      from '../admin-auth/decorators/admin-roles.decorator';
@@ -18,6 +19,34 @@ class UpdatePlanDto   { @IsEnum(Plan)              @IsNotEmpty()             pla
 class ReplyDto         { @IsString()                @IsNotEmpty()             body!:    string; }
 class UpdateStatusDto  { @IsString()                @IsNotEmpty() @IsOptional() status?: string; }
 class NoteDto          { @IsString()                @IsNotEmpty()             body!:    string; }
+
+class UpdateBillingConfigDto {
+  @IsInt()      @IsOptional() trialDays?:            number;
+  @IsNumber()   @IsOptional() paygRateProUsd?:       number;
+  @IsNumber()   @IsOptional() paygRateFreeUsd?:      number;
+  @IsInt()      @IsOptional() managedMarkupPercent?: number;
+}
+
+class CreateBillingProductDto implements CreateBillingProductInput {
+  @IsString()   @IsNotEmpty()  name!:           string;
+  @IsString()   @IsOptional()  description?:    string | null;
+  @IsString()   @IsOptional()  stripeProductId?: string | null;
+  @IsString()   @IsOptional()  stripePriceId?:  string | null; // omit to auto-create in Stripe
+  @IsEnum(Plan) @IsOptional()  planType?:       Plan;
+  @IsString()   @IsOptional()  interval?:       string;
+  @IsInt()                     amountCents!:    number;
+  @IsString()   @IsOptional()  currency?:       string;
+  @IsBoolean()  @IsOptional()  isPublic?:       boolean;
+  @IsBoolean()  @IsOptional()  isActive?:       boolean;
+  @IsInt()      @IsOptional()  trialDays?:      number | null;
+  @IsString()   @IsOptional()  notes?:          string | null;
+}
+
+class AssignCustomPlanDto {
+  @IsString()  @IsNotEmpty()  userId!:    string;
+  @IsString()  @IsNotEmpty()  productId!: string;
+  @IsString()  @IsOptional()  notes?:     string;
+}
 class SendEmailDto     {
   @IsString() @IsNotEmpty() subject!: string;
   @IsString() @IsNotEmpty() body!:    string;
@@ -29,8 +58,9 @@ class SendEmailDto     {
 @ApiBearerAuth('jwt')
 export class AdminController {
   constructor(
-    private readonly admin: AdminService,
-    private readonly audit: AuditService,
+    private readonly admin:   AdminService,
+    private readonly audit:   AuditService,
+    private readonly billing: BillingService,
   ) {}
 
   // ── Analytics ──────────────────────────────────────────────────────────────
@@ -191,5 +221,75 @@ export class AdminController {
       from: from ? new Date(from) : undefined,
       to:   to   ? new Date(to)   : undefined,
     });
+  }
+
+  // ── Billing config ─────────────────────────────────────────────────────────
+
+  @Get('billing/config')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Get billing config singleton' })
+  getBillingConfig() {
+    return this.billing.getConfig();
+  }
+
+  @Patch('billing/config')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Update billing config' })
+  updateBillingConfig(@Body() body: UpdateBillingConfigDto) {
+    return this.billing.updateBillingConfig(body);
+  }
+
+  // ── Billing products ───────────────────────────────────────────────────────
+
+  @Get('billing/products')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'List all billing products (admin)' })
+  listBillingProducts() {
+    return this.billing.listAdminProducts();
+  }
+
+  @Post('billing/products')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Create a new billing product' })
+  createBillingProduct(@Body() body: CreateBillingProductDto, @GetAdminUser() admin: AdminUser) {
+    return this.billing.createBillingProduct(body, admin.id);
+  }
+
+  @Patch('billing/products/:id/toggle')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Activate or deactivate a billing product' })
+  toggleBillingProduct(@Param('id') id: string, @Body() body: { isActive: boolean }) {
+    return this.billing.toggleBillingProduct(id, body.isActive);
+  }
+
+  // ── Custom plan assignments ────────────────────────────────────────────────
+
+  @Get('billing/assignments')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'List all custom plan assignments' })
+  listAssignments() {
+    return this.billing.listCustomAssignments();
+  }
+
+  @Post('billing/assignments')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Assign a custom plan to a user' })
+  assignCustomPlan(@Body() body: AssignCustomPlanDto, @GetAdminUser() admin: AdminUser) {
+    return this.billing.assignCustomPlan(body.userId, body.productId, body.notes, admin.id);
+  }
+
+  @Delete('billing/assignments/:userId')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Remove custom plan assignment for a user' })
+  removeAssignment(@Param('userId') userId: string) {
+    return this.billing.removeCustomAssignment(userId);
   }
 }

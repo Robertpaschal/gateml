@@ -1,3 +1,4 @@
+"use client";
 import { Shuffle, ShieldCheck, Activity, GitBranch, FlaskConical, KeyRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 

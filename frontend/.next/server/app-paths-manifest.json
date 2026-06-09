@@ -1,3 +1,20 @@
 {
-  "/page": "app/page.js"
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/firebase-config/route": "app/api/firebase-config/route.js",
+  "/auth/page": "app/auth/page.js",
+  "/page": "app/page.js",
+  "/unsubscribe/page": "app/unsubscribe/page.js",
+  "/changelog/page": "app/changelog/page.js",
+  "/dashboard/gateway/page": "app/dashboard/gateway/page.js",
+  "/dashboard/billing/page": "app/dashboard/billing/page.js",
+  "/dashboard/replay/page": "app/dashboard/replay/page.js",
+  "/dashboard/account/page": "app/dashboard/account/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/dashboard/prompts/page": "app/dashboard/prompts/page.js",
+  "/dashboard/testing/page": "app/dashboard/testing/page.js",
+  "/dashboard/support/page": "app/dashboard/support/page.js",
+  "/dashboard/observe/page": "app/dashboard/observe/page.js",
+  "/docs/sdk/page": "app/docs/sdk/page.js",
+  "/docs/quickstart/page": "app/docs/quickstart/page.js",
+  "/docs/page": "app/docs/page.js"
 }

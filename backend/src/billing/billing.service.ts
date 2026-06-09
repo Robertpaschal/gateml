@@ -107,7 +107,7 @@ export class BillingService implements OnModuleInit {
           interval:       defaults.interval,
           amountCents,
           currency:       'usd',
-          trialDays:      cfg.trialDays,
+          trialDays:      null,
           isPublic:       true,
           isActive:       true,
         },
@@ -295,7 +295,8 @@ export class BillingService implements OnModuleInit {
     });
     if (!promo || !promo.isActive) return { valid: false, reason: 'Code not found or inactive.' };
     const now = new Date();
-    if (promo.validUntil && promo.validUntil < now) return { valid: false, reason: 'Code has expired.' };
+    if (promo.validFrom > now)                       return { valid: false, reason: 'Code is not yet valid.' };
+    if (promo.validUntil && promo.validUntil < now)  return { valid: false, reason: 'Code has expired.' };
     if (promo.maxUses !== null && promo.usedCount >= promo.maxUses!) return { valid: false, reason: 'Code usage limit reached.' };
     return { valid: true, discountPercent: promo.discountPercent };
   }
@@ -380,6 +381,14 @@ export class BillingService implements OnModuleInit {
     const cfg       = await this.getConfig();
     const trialDays = product.trialDays ?? cfg.trialDays;
 
+    // One trial per customer — if this user has ever held any subscription (even a cancelled
+    // one) skip the trial so they cannot abuse it by re-subscribing after cancellation.
+    const hadPriorSub = await this.prisma.subscription.findFirst({
+      where:  { userId },
+      select: { id: true },
+    });
+    const effectiveTrialDays = hadPriorSub ? 0 : trialDays;
+
     // Resolve promo code to a Stripe coupon for server-side application.
     // When a coupon is applied server-side, allow_promotion_codes must be omitted
     // (Stripe doesn't allow both simultaneously).
@@ -410,7 +419,7 @@ export class BillingService implements OnModuleInit {
       ),
       subscription_data: {
         metadata: { userId },
-        ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
+        ...(effectiveTrialDays > 0 ? { trial_period_days: effectiveTrialDays } : {}),
       },
     });
 
@@ -462,6 +471,9 @@ export class BillingService implements OnModuleInit {
       case 'invoice.payment_succeeded':
         await this.handleInvoicePaid(obj);
         break;
+      case 'customer.subscription.trial_will_end':
+        await this.handleTrialWillEnd(obj);
+        break;
       case 'invoice.upcoming':
         await this.handleInvoiceUpcoming(obj);
         break;
@@ -490,6 +502,8 @@ export class BillingService implements OnModuleInit {
     const paygRate    = plan === 'FREE' ? cfg.paygRateFreeUsd : cfg.paygRateProUsd;
     const markupFactor = cfg.managedMarkupPercent / 100;
 
+    // markupFactor is only needed to back-calculate the base provider cost for the
+    // invoice description — managedCostUsd already has markup baked in at record time.
     const unbilledPayg    = rec.paygRequests - rec.paygBilled;
     const unbilledManaged = rec.managedCostUsd - rec.managedBilled;
 
@@ -514,14 +528,17 @@ export class BillingService implements OnModuleInit {
     }
 
     if (unbilledManaged > 0) {
-      const managedFee = unbilledManaged * (1 + markupFactor) - unbilledManaged;
+      // unbilledManaged is already cost+markup (calculateManaged stores the marked-up total).
+      // Applying the formula again would only charge the markup fraction — bill the full amount.
+      const managedFee      = unbilledManaged;
+      const baseProviderCost = unbilledManaged / (1 + markupFactor);
       if (managedFee >= 0.50) {
         await this.stripe.invoiceItems.create({
           customer:     customerId,
           subscription: subId,
           amount:       Math.round(managedFee * 100),
           currency:     'usd',
-          description:  `Managed Keys markup: ${cfg.managedMarkupPercent}% on $${unbilledManaged.toFixed(4)} provider cost`,
+          description:  `Managed Keys: ${cfg.managedMarkupPercent}% markup on $${baseProviderCost.toFixed(4)} provider cost`,
         });
         await this.prisma.usageRecord.update({
           where: { userId_month: { userId: user.id, month } },
@@ -542,6 +559,11 @@ export class BillingService implements OnModuleInit {
 
     const user = await this.prisma.user.findFirst({ where: { stripeCustomerId: customerId } });
     if (!user) return;
+
+    // $0 invoices are emitted by Stripe at trial start — no real payment was collected.
+    // Promo usedCount must only increment when money actually changes hands, and there
+    // is no need to send a PDF invoice for a zero-amount charge.
+    if (((invoice['amount_paid'] as number) ?? 0) === 0) return;
 
     // Track promo code usage. Stripe places the coupon on the invoice's `discount`
     // (or `discounts[]` in newer API versions). We match by stripeCouponId and
@@ -630,8 +652,12 @@ export class BillingService implements OnModuleInit {
     const prevUser = await this.prisma.user.findUnique({ where: { id: userId }, select: { plan: true, email: true, name: true } });
     await this.prisma.user.update({ where: { id: userId }, data: { plan } });
 
-    if (prevUser && prevUser.plan !== plan && isActive) {
-      this.email.sendPlanUpgraded(prevUser.email, prevUser.name, plan);
+    if (prevUser && prevUser.plan !== plan) {
+      if (isActive) {
+        this.email.sendPlanUpgraded(prevUser.email, prevUser.name, plan);
+      } else if (['past_due', 'unpaid'].includes(status)) {
+        this.email.sendPaymentFailed(prevUser.email, prevUser.name);
+      }
     }
 
     await this.prisma.subscription.upsert({
@@ -664,6 +690,23 @@ export class BillingService implements OnModuleInit {
     if (!sub) return;
     await this.prisma.subscription.update({ where: { stripeSubId }, data: { status: 'canceled', updatedAt: new Date() } });
     await this.prisma.user.update({ where: { id: sub.userId }, data: { plan: Plan.FREE } });
+  }
+
+  private async handleTrialWillEnd(sub: Record<string, unknown>) {
+    const metadata = sub.metadata as Record<string, string> | undefined;
+    const userId   = metadata?.userId;
+    if (!userId) return;
+
+    const trialEndRaw = sub.trial_end as number | null;
+    if (!trialEndRaw) return;
+
+    const user = await this.prisma.user.findUnique({
+      where:  { id: userId },
+      select: { email: true, name: true },
+    });
+    if (!user) return;
+
+    this.email.sendTrialEnding(user.email, user.name, new Date(trialEndRaw * 1000));
   }
 
   async togglePayAsYouGo(userId: string, enabled: boolean) {

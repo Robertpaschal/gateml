@@ -245,6 +245,22 @@ export class EmailService implements OnModuleInit {
     });
   }
 
+  sendTrialEnding(to: string, name: string | null, trialEndAt: Date) {
+    const endDate = trialEndAt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    this.enqueue(to, `Your GateML trial ends ${endDate} — add a payment method to keep Pro`, 'trial-ending', {
+      name: name ?? 'there',
+      endDate,
+      billingUrl: `${this.appUrl}/dashboard/billing`,
+    });
+  }
+
+  sendPaymentFailed(to: string, name: string | null) {
+    this.enqueue(to, 'GateML: payment failed — your plan has been downgraded to Free', 'payment-failed', {
+      name: name ?? 'there',
+      billingUrl: `${this.appUrl}/dashboard/billing`,
+    });
+  }
+
   sendPlanUpgraded(to: string, name: string | null, plan: string) {
     this.enqueue(to, `GateML: you're now on ${plan}`, 'plan-upgraded', {
       name: name ?? 'there', plan, isPro: plan === 'PRO',

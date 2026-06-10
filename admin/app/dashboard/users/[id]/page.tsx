@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { adminUsersApi, notesApi, adminEmailApi, type AdminUserDetail, type AdminNote } from "@/lib/api";
+import { adminUsersApi, notesApi, adminEmailApi, adminBillingActionsApi, type AdminUserDetail, type AdminNote, type StripeInvoice } from "@/lib/api";
 import { getAdminToken } from "@/lib/auth";
 
 const PLANS = ["FREE", "PRO", "ENTERPRISE"];
@@ -40,6 +40,16 @@ export default function UserDetailPage() {
   const [emailBody,    setEmailBody]    = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailMsg,     setEmailMsg]     = useState("");
+
+  const [invoices,       setInvoices]       = useState<StripeInvoice[]>([]);
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  const [resendingId,    setResendingId]    = useState<string | null>(null);
+  const [refundCents,    setRefundCents]    = useState("");
+  const [refundReason,   setRefundReason]   = useState("requested_by_customer");
+  const [refunding,      setRefunding]      = useState(false);
+  const [refundMsg,      setRefundMsg]      = useState("");
+  const [cancelling,     setCancelling]     = useState(false);
+  const [cancelMsg,      setCancelMsg]      = useState("");
 
   const token = getAdminToken()!;
 
@@ -93,6 +103,46 @@ export default function UserDetailPage() {
       setEmailSubject(""); setEmailBody("");
     } catch (e: unknown) { setEmailMsg(e instanceof Error ? e.message : "Failed"); }
     finally { setSendingEmail(false); }
+  }
+
+  async function loadInvoices() {
+    if (invoicesLoaded) return;
+    try {
+      const { invoices: list } = await adminBillingActionsApi.listInvoices(token, id);
+      setInvoices(list);
+      setInvoicesLoaded(true);
+    } catch { /* stripe not configured or no customer */ }
+  }
+
+  async function resendInvoice(invoiceId: string) {
+    setResendingId(invoiceId);
+    try {
+      await adminBillingActionsApi.resendInvoice(token, id, invoiceId);
+    } finally { setResendingId(null); }
+  }
+
+  async function issueRefund(e: React.FormEvent) {
+    e.preventDefault();
+    setRefunding(true); setRefundMsg("");
+    try {
+      const cents = refundCents ? parseInt(refundCents, 10) : undefined;
+      const res = await adminBillingActionsApi.issueRefund(token, id, cents, refundReason || undefined);
+      setRefundMsg(`Refund ${res.refundId} issued — $${(res.amountCents / 100).toFixed(2)}`);
+      setRefundCents("");
+    } catch (e: unknown) {
+      setRefundMsg(e instanceof Error ? e.message : "Refund failed");
+    } finally { setRefunding(false); }
+  }
+
+  async function cancelSubscription(immediately: boolean) {
+    if (!confirm(immediately ? "Cancel immediately? The user loses access now." : "Cancel at period end?")) return;
+    setCancelling(true); setCancelMsg("");
+    try {
+      await adminBillingActionsApi.cancelSubscription(token, id, immediately);
+      setCancelMsg(immediately ? "Subscription cancelled immediately." : "Subscription set to cancel at period end.");
+    } catch (e: unknown) {
+      setCancelMsg(e instanceof Error ? e.message : "Failed");
+    } finally { setCancelling(false); }
   }
 
   if (error) return <div style={{ color: "var(--red)" }}>{error}</div>;
@@ -272,6 +322,128 @@ export default function UserDetailPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Billing actions */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+        {/* Refund */}
+        <div className="card">
+          <SectionTitle>Issue Refund</SectionTitle>
+          <form onSubmit={issueRefund}>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 11, color: "var(--muted)", display: "block", marginBottom: 4 }}>
+                Amount (cents) — blank = full refund
+              </label>
+              <input type="number" min="50" value={refundCents}
+                onChange={e => setRefundCents(e.target.value)}
+                placeholder="e.g. 1900 for $19.00" style={{ width: "100%", marginBottom: 8 }} />
+              <label style={{ fontSize: 11, color: "var(--muted)", display: "block", marginBottom: 4 }}>Reason</label>
+              <select value={refundReason} onChange={e => setRefundReason(e.target.value)} style={{ width: "100%" }}>
+                <option value="requested_by_customer">Requested by customer</option>
+                <option value="duplicate">Duplicate charge</option>
+                <option value="fraudulent">Fraudulent</option>
+              </select>
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={refunding} style={{ fontSize: 11 }}>
+              {refunding ? "Issuing…" : "Issue Refund"}
+            </button>
+            {refundMsg && (
+              <div style={{ fontSize: 11, marginTop: 8, color: refundMsg.startsWith("Refund") ? "var(--green)" : "var(--red)" }}>
+                {refundMsg}
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* Cancel subscription */}
+        <div className="card">
+          <SectionTitle>Cancel Subscription</SectionTitle>
+          {user.subscription ? (
+            <>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+                Status: <strong>{user.subscription.status}</strong> · renews {new Date(user.subscription.currentPeriodEnd).toLocaleDateString()}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn btn-ghost" disabled={cancelling} style={{ fontSize: 11 }}
+                  onClick={() => cancelSubscription(false)}>
+                  Cancel at period end
+                </button>
+                <button className="btn btn-ghost" disabled={cancelling}
+                  style={{ fontSize: 11, color: "var(--red)", borderColor: "var(--red)" }}
+                  onClick={() => cancelSubscription(true)}>
+                  Cancel immediately
+                </button>
+              </div>
+              {cancelMsg && (
+                <div style={{ fontSize: 11, marginTop: 8, color: cancelMsg.startsWith("Subscription") ? "var(--green)" : "var(--red)" }}>
+                  {cancelMsg}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: 11, color: "var(--muted2)" }}>No active subscription.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Invoice history */}
+      <div className="card" style={{ marginBottom: 20, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Invoice History
+          </span>
+          {!invoicesLoaded && (
+            <button className="btn btn-ghost" style={{ fontSize: 10, padding: "4px 10px" }} onClick={loadInvoices}>
+              Load invoices
+            </button>
+          )}
+        </div>
+        {invoicesLoaded && (
+          <table className="table">
+            <thead>
+              <tr><th>Invoice</th><th>Status</th><th>Amount</th><th>Period</th><th>Date</th><th></th></tr>
+            </thead>
+            <tbody>
+              {invoices.length === 0 && (
+                <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted2)", padding: 16 }}>No invoices</td></tr>
+              )}
+              {invoices.map(inv => (
+                <tr key={inv.id}>
+                  <td style={{ fontFamily: "monospace", fontSize: 10, color: "var(--muted2)" }}>
+                    {inv.number ?? inv.id.slice(0, 12)}
+                  </td>
+                  <td>
+                    <span className={`badge ${inv.status === "paid" ? "badge-green" : inv.status === "open" ? "badge-yellow" : "badge-muted"}`}>
+                      {inv.status}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontWeight: 600, color: "var(--accent)" }}>
+                    ${(inv.amountPaid / 100).toFixed(2)}
+                  </td>
+                  <td style={{ fontSize: 11, color: "var(--muted)" }}>
+                    {new Date(inv.periodStart).toLocaleDateString()} – {new Date(inv.periodEnd).toLocaleDateString()}
+                  </td>
+                  <td style={{ fontSize: 11, color: "var(--muted)" }}>
+                    {new Date(inv.created).toLocaleDateString()}
+                  </td>
+                  <td style={{ display: "flex", gap: 6 }}>
+                    {inv.hostedUrl && (
+                      <a href={inv.hostedUrl} target="_blank" rel="noreferrer"
+                        className="btn btn-ghost" style={{ fontSize: 10, padding: "3px 8px" }}>
+                        View
+                      </a>
+                    )}
+                    <button className="btn btn-ghost" style={{ fontSize: 10, padding: "3px 8px" }}
+                      disabled={resendingId === inv.id}
+                      onClick={() => resendInvoice(inv.id)}>
+                      {resendingId === inv.id ? "…" : "Resend"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Recent logs */}

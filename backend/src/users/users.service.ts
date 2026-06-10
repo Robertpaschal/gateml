@@ -4,11 +4,12 @@ import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { EmailService }         from '../email/email.service';
 
 interface UpsertUserDto {
-  firebaseUid: string;
-  email:       string;
-  name?:       string | null;
-  avatarUrl?:  string | null;
-  provider:    string;
+  firebaseUid:    string;
+  email:          string;
+  name?:          string | null;
+  avatarUrl?:     string | null;
+  provider:       string;
+  emailVerified?: boolean;
 }
 
 @Injectable()
@@ -20,15 +21,21 @@ export class UsersService {
   ) {}
 
   async upsert(dto: UpsertUserDto) {
+    // OAuth providers (Google, GitHub, Apple) verify emails — treat them as verified
+    // so users are reachable for campaigns. Also back-fills existing OAuth accounts
+    // on next login since `update` includes emailVerified.
+    const verified = dto.emailVerified ?? (dto.provider !== 'email');
+
     const user = await this.prisma.user.upsert({
       where:  { firebaseUid: dto.firebaseUid },
-      update: { email: dto.email, name: dto.name, avatarUrl: dto.avatarUrl },
+      update: { email: dto.email, name: dto.name, avatarUrl: dto.avatarUrl, emailVerified: verified },
       create: {
-        firebaseUid: dto.firebaseUid,
-        email:       dto.email,
-        name:        dto.name,
-        avatarUrl:   dto.avatarUrl,
-        provider:    dto.provider,
+        firebaseUid:   dto.firebaseUid,
+        email:         dto.email,
+        name:          dto.name,
+        avatarUrl:     dto.avatarUrl,
+        provider:      dto.provider,
+        emailVerified: verified,
       },
     });
 

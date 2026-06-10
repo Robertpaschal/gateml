@@ -193,6 +193,8 @@ export class FirebaseAdminService implements OnModuleInit {
 
   // ── Internals ──────────────────────────────────────────────────────────────
 
+  get isReady(): boolean { return this.ready; }
+
   private assertReady(): void {
     if (!this.ready) throw new Error('Firebase Admin SDK is not configured.');
   }

@@ -9,6 +9,13 @@ import StripeLib from 'stripe';
 
 type StripeClient = InstanceType<typeof StripeLib>;
 
+export interface InvoiceSummary {
+  id: string; number: string | null; status: string | null;
+  amountDue: number; amountPaid: number; currency: string;
+  created: string; periodStart: string; periodEnd: string;
+  hostedUrl: string | null; pdfUrl: string | null;
+}
+
 function currentMonth(): string {
   return new Date().toISOString().slice(0, 7); // "2026-06"
 }
@@ -368,6 +375,17 @@ export class BillingService implements OnModuleInit {
       throw new HttpException('Invalid or inactive price', HttpStatus.BAD_REQUEST);
     }
 
+    // Private products require an explicit custom assignment for this user.
+    // This prevents customers from checking out with an enterprise price ID they guessed.
+    if (!product.isPublic) {
+      const assignment = await this.prisma.customPlanAssignment.findFirst({
+        where: { userId, productId: product.id },
+      });
+      if (!assignment) {
+        throw new HttpException('Invalid or inactive price', HttpStatus.BAD_REQUEST);
+      }
+    }
+
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
 
@@ -440,6 +458,99 @@ export class BillingService implements OnModuleInit {
     return { url: session.url };
   }
 
+  // ── Admin financial operations ────────────────────────────────────────────
+
+  async adminIssueRefund(userId: string, amountCents?: number, reason?: string) {
+    if (!this.stripe) throw new HttpException('Payments not configured', HttpStatus.SERVICE_UNAVAILABLE);
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.stripeCustomerId) throw new HttpException('No billing account found', HttpStatus.NOT_FOUND);
+
+    // Find the most recent paid charge for this customer
+    const charges = await this.stripe.charges.list({ customer: user.stripeCustomerId, limit: 1 });
+    const charge  = charges.data[0];
+    if (!charge) throw new HttpException('No charge found to refund', HttpStatus.NOT_FOUND);
+
+    const refundable = charge.amount - charge.amount_refunded;
+    if (refundable <= 0) throw new HttpException('Charge already fully refunded', HttpStatus.BAD_REQUEST);
+
+    const refundAmount = amountCents ?? refundable;
+    if (refundAmount > refundable) throw new HttpException(
+      `Refund amount exceeds refundable balance ($${(refundable / 100).toFixed(2)})`,
+      HttpStatus.BAD_REQUEST,
+    );
+
+    const refund = await this.stripe.refunds.create({
+      charge: charge.id,
+      amount: refundAmount,
+      ...(reason ? { reason: reason as 'duplicate' | 'fraudulent' | 'requested_by_customer' } : {}),
+    });
+
+    return {
+      refundId:    refund.id,
+      amountCents: refund.amount,
+      status:      refund.status,
+    };
+  }
+
+  async adminCancelSubscription(userId: string, immediately = false) {
+    if (!this.stripe) throw new HttpException('Payments not configured', HttpStatus.SERVICE_UNAVAILABLE);
+
+    const sub = await this.prisma.subscription.findFirst({
+      where: { userId, status: { in: ['active', 'trialing', 'past_due'] } },
+    });
+    if (!sub) throw new HttpException('No active subscription found', HttpStatus.NOT_FOUND);
+
+    if (immediately) {
+      await this.stripe.subscriptions.cancel(sub.stripeSubId);
+    } else {
+      await this.stripe.subscriptions.update(sub.stripeSubId, { cancel_at_period_end: true });
+    }
+
+    return { cancelled: true, immediately, subscriptionId: sub.stripeSubId };
+  }
+
+  async adminListInvoices(userId: string): Promise<{ invoices: InvoiceSummary[] }> {
+    if (!this.stripe) throw new HttpException('Payments not configured', HttpStatus.SERVICE_UNAVAILABLE);
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.stripeCustomerId) return { invoices: [] };
+
+    const list = await this.stripe.invoices.list({
+      customer: user.stripeCustomerId,
+      limit:    20,
+    });
+
+    return {
+      invoices: list.data.map(inv => ({
+        id:          inv.id,
+        number:      inv.number,
+        status:      inv.status,
+        amountDue:   inv.amount_due,
+        amountPaid:  inv.amount_paid,
+        currency:    inv.currency,
+        created:     new Date(inv.created * 1000).toISOString(),
+        periodStart: new Date(inv.period_start * 1000).toISOString(),
+        periodEnd:   new Date(inv.period_end   * 1000).toISOString(),
+        hostedUrl:   inv.hosted_invoice_url  ?? null,
+        pdfUrl:      inv.invoice_pdf          ?? null,
+      })),
+    };
+  }
+
+  async adminResendInvoice(userId: string, invoiceId: string) {
+    if (!this.stripe) throw new HttpException('Payments not configured', HttpStatus.SERVICE_UNAVAILABLE);
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.stripeCustomerId) throw new HttpException('No billing account found', HttpStatus.NOT_FOUND);
+
+    const inv = await this.stripe.invoices.retrieve(invoiceId);
+    if (inv.customer !== user.stripeCustomerId) throw new HttpException('Invoice not found', HttpStatus.NOT_FOUND);
+
+    await this.stripe.invoices.sendInvoice(invoiceId);
+    return { sent: true };
+  }
+
   async handleWebhook(rawBody: Buffer, signature: string) {
     if (!this.stripe) throw new HttpException('Payments not configured', HttpStatus.SERVICE_UNAVAILABLE);
 
@@ -477,7 +588,79 @@ export class BillingService implements OnModuleInit {
       case 'invoice.upcoming':
         await this.handleInvoiceUpcoming(obj);
         break;
+      case 'price.updated':
+        await this.handlePriceUpdated(obj);
+        break;
+      case 'product.updated':
+        await this.handleProductUpdated(obj);
+        break;
+      case 'invoice.payment_failed':
+        await this.handlePaymentAttemptFailed(obj);
+        break;
+      case 'charge.refunded':
+        await this.handleChargeRefunded(obj);
+        break;
     }
+  }
+
+  private async handlePriceUpdated(price: Record<string, unknown>) {
+    const stripePriceId = price['id'] as string;
+    const amountCents   = price['unit_amount'] as number | null;
+    if (!stripePriceId || amountCents == null) return;
+
+    await this.prisma.billingProduct.updateMany({
+      where: { stripePriceId },
+      data:  { amountCents },
+    });
+    this.logger.log(`Price synced from webhook: ${stripePriceId} → ${amountCents} cents`);
+  }
+
+  private async handleProductUpdated(product: Record<string, unknown>) {
+    const stripeProductId = product['id'] as string;
+    const name            = product['name'] as string | undefined;
+    const description     = product['description'] as string | null | undefined;
+    if (!stripeProductId || !name) return;
+
+    await this.prisma.billingProduct.updateMany({
+      where: { stripeProductId },
+      data:  { name, ...(description !== undefined ? { description } : {}) },
+    });
+    this.logger.log(`Product synced from webhook: ${stripeProductId} → "${name}"`);
+  }
+
+  private async handlePaymentAttemptFailed(invoice: Record<string, unknown>) {
+    const customerId  = invoice['customer']       as string;
+    const attemptCount = invoice['attempt_count'] as number ?? 1;
+    const amountDue   = invoice['amount_due']     as number | null;
+    if (!customerId) return;
+
+    const user = await this.prisma.user.findFirst({
+      where:  { stripeCustomerId: customerId },
+      select: { email: true, name: true },
+    });
+    if (!user) return;
+
+    const amountStr = amountDue != null
+      ? `$${(amountDue / 100).toFixed(2)} USD`
+      : undefined;
+
+    this.email.sendPaymentAttemptFailed(user.email, user.name, attemptCount, amountStr);
+  }
+
+  private async handleChargeRefunded(charge: Record<string, unknown>) {
+    const customerId    = charge['customer']        as string;
+    const amountRefunded = charge['amount_refunded'] as number | null;
+    if (!customerId || !amountRefunded) return;
+
+    const user = await this.prisma.user.findFirst({
+      where:  { stripeCustomerId: customerId },
+      select: { email: true, name: true },
+    });
+    if (!user) return;
+
+    const amount = `$${(amountRefunded / 100).toFixed(2)} USD`;
+    this.email.sendRefundConfirmation(user.email, user.name, amount);
+    this.logger.log(`Refund email sent to ${user.email} for ${amount}`);
   }
 
   private async handleInvoiceUpcoming(invoice: Record<string, unknown>) {

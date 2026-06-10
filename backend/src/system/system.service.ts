@@ -71,6 +71,10 @@ export class SystemService implements OnModuleInit {
   }
 
   async seedSystemStatus() {
+    if (!this.firebase.isReady) {
+      this.logger.warn('Skipping system status seed — Firebase not configured.');
+      return;
+    }
     await this.firebase.setSystemStatus({
       operational:      true,
       message:          'All systems operational',
@@ -80,6 +84,10 @@ export class SystemService implements OnModuleInit {
   }
 
   async seedChangelog() {
+    if (!this.firebase.isReady) {
+      this.logger.warn('Skipping changelog seed — Firebase not configured.');
+      return;
+    }
     for (const { id, ...entry } of CHANGELOG) {
       await this.firebase.upsertChangelogEntry(id, entry);
     }

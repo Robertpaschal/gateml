@@ -338,6 +338,44 @@ export const customPlansApi = {
     req<void>(`/admin/billing/assignments/${userId}`, { method: "DELETE" }, token),
 };
 
+// ── Per-user billing actions ──────────────────────────────────────────────────
+
+export interface StripeInvoice {
+  id:          string;
+  number:      string | null;
+  status:      string | null;
+  amountDue:   number;
+  amountPaid:  number;
+  currency:    string;
+  created:     string;
+  periodStart: string;
+  periodEnd:   string;
+  hostedUrl:   string | null;
+  pdfUrl:      string | null;
+}
+
+export const adminBillingActionsApi = {
+  listInvoices: (token: string, userId: string) =>
+    req<{ invoices: StripeInvoice[] }>(`/admin/billing/users/${userId}/invoices`, {}, token),
+
+  resendInvoice: (token: string, userId: string, invoiceId: string) =>
+    req<{ sent: boolean }>(`/admin/billing/users/${userId}/invoices/${invoiceId}/resend`, { method: "POST" }, token),
+
+  issueRefund: (token: string, userId: string, amountCents?: number, reason?: string) =>
+    req<{ refundId: string; amountCents: number; status: string }>(
+      `/admin/billing/users/${userId}/refund`,
+      { method: "POST", body: JSON.stringify({ amountCents, reason }) },
+      token,
+    ),
+
+  cancelSubscription: (token: string, userId: string, immediately = false) =>
+    req<{ cancelled: boolean; immediately: boolean; subscriptionId: string }>(
+      `/admin/billing/users/${userId}/cancel-subscription`,
+      { method: "POST", body: JSON.stringify({ immediately }) },
+      token,
+    ),
+};
+
 // ── Domain allowlist ──────────────────────────────────────────────────────────
 
 export interface DomainEntry {

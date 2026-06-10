@@ -47,9 +47,18 @@ class AssignCustomPlanDto {
   @IsString()  @IsNotEmpty()  productId!: string;
   @IsString()  @IsOptional()  notes?:     string;
 }
-class SendEmailDto     {
+class SendEmailDto {
   @IsString() @IsNotEmpty() subject!: string;
   @IsString() @IsNotEmpty() body!:    string;
+}
+
+class RefundDto {
+  @IsInt()    @IsOptional() amountCents?: number;
+  @IsString() @IsOptional() reason?:      string;
+}
+
+class CancelSubscriptionDto {
+  @IsBoolean() @IsOptional() immediately?: boolean;
 }
 
 @ApiTags('admin')
@@ -291,5 +300,57 @@ export class AdminController {
   @ApiOperation({ summary: 'Remove custom plan assignment for a user' })
   removeAssignment(@Param('userId') userId: string) {
     return this.billing.removeCustomAssignment(userId);
+  }
+
+  // ── Per-user financial actions ─────────────────────────────────────────────
+
+  @Get('billing/users/:id/invoices')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN', 'ANALYST')
+  @ApiOperation({ summary: 'List Stripe invoices for a user' })
+  listInvoices(@Param('id') id: string) {
+    return this.billing.adminListInvoices(id);
+  }
+
+  @Post('billing/users/:id/invoices/:invoiceId/resend')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Resend a Stripe invoice email to the user' })
+  async resendInvoice(
+    @Param('id') id: string, @Param('invoiceId') invoiceId: string,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.billing.adminResendInvoice(id, invoiceId);
+    await this.audit.log({ adminId: admin.id, resource: 'user', resourceId: id,
+      action: 'billing.invoice_resent', metadata: { invoiceId }, req });
+    return result;
+  }
+
+  @Post('billing/users/:id/refund')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Issue a full or partial refund for the most recent charge' })
+  async issueRefund(
+    @Param('id') id: string, @Body() body: RefundDto,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.billing.adminIssueRefund(id, body.amountCents, body.reason);
+    await this.audit.log({ adminId: admin.id, resource: 'user', resourceId: id,
+      action: 'billing.refund_issued', metadata: { amountCents: body.amountCents, reason: body.reason }, req });
+    return result;
+  }
+
+  @Post('billing/users/:id/cancel-subscription')
+  @UseGuards(AdminRolesGuard)
+  @AdminRoles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Cancel a user subscription (immediately or at period end)' })
+  async cancelSubscription(
+    @Param('id') id: string, @Body() body: CancelSubscriptionDto,
+    @GetAdminUser() admin: AdminUser, @Req() req: Request,
+  ) {
+    const result = await this.billing.adminCancelSubscription(id, body.immediately ?? false);
+    await this.audit.log({ adminId: admin.id, resource: 'user', resourceId: id,
+      action: 'billing.subscription_cancelled', metadata: { immediately: body.immediately }, req });
+    return result;
   }
 }

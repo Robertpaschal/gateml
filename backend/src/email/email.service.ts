@@ -23,12 +23,20 @@ interface Attachment {
 }
 
 class ResendTransport implements EmailTransport {
-  private resend: any;
-  constructor(apiKey: string) {
-    import('resend').then(({ Resend }) => { this.resend = new Resend(apiKey); });
+  private resendClient: any = null;
+  constructor(private readonly apiKey: string) {}
+
+  private async getClient() {
+    if (!this.resendClient) {
+      const { Resend } = await import('resend');
+      this.resendClient = new Resend(this.apiKey);
+    }
+    return this.resendClient;
   }
+
   async send(from: string, to: string, subject: string, html: string, attachments?: Attachment[]) {
-    const result = await this.resend.emails.send({
+    const resend = await this.getClient();
+    const result = await resend.emails.send({
       from, to, subject, html,
       ...(attachments?.length ? { attachments: attachments.map(a => ({
         filename: a.filename,
@@ -257,6 +265,24 @@ export class EmailService implements OnModuleInit {
   sendPaymentFailed(to: string, name: string | null) {
     this.enqueue(to, 'GateML: payment failed — your plan has been downgraded to Free', 'payment-failed', {
       name: name ?? 'there',
+      billingUrl: `${this.appUrl}/dashboard/billing`,
+    });
+  }
+
+  sendPaymentAttemptFailed(to: string, name: string | null, attemptCount: number, amountDue?: string) {
+    this.enqueue(to, 'GateML: payment failed — please update your payment method', 'payment-attempt-failed', {
+      name: name ?? 'there',
+      attemptCount,
+      amountDue: amountDue ?? null,
+      billingUrl: `${this.appUrl}/dashboard/billing`,
+    });
+  }
+
+  sendRefundConfirmation(to: string, name: string | null, amount: string, reason?: string) {
+    this.enqueue(to, 'GateML: refund processed', 'refund', {
+      name: name ?? 'there',
+      amount,
+      reason:     reason ?? null,
       billingUrl: `${this.appUrl}/dashboard/billing`,
     });
   }

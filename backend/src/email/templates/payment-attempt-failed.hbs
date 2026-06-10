@@ -1,0 +1,17 @@
+<h1>Payment failed — action needed</h1>
+<p>Hi {{name}},</p>
+<p>We couldn't process your GateML Pro payment (attempt {{attemptCount}}).
+Your plan is still active while we retry, but please update your payment method now to avoid interruption.</p>
+
+{{#if amountDue}}
+<div class="highlight">
+  <p style="margin:0 0 4px;font-size:13px;color:#a1a1aa;">Amount due</p>
+  <p style="margin:0;font-size:20px;font-weight:700;color:#e5e5e5;">{{amountDue}}</p>
+</div>
+{{/if}}
+
+<p style="text-align:center;margin:24px 0;">
+  <a class="btn" href="{{billingUrl}}">Update Payment Method</a>
+</p>
+
+<p style="font-size:13px;color:#555;">If you need help or believe this is an error, reply to this email and we'll sort it out right away.</p>

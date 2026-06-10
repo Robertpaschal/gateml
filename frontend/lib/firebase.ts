@@ -178,9 +178,10 @@ export function subscribeToChangelog(
         const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChangelogEntry));
         onEntries(entries);
       },
-      () => undefined,
+      () => onEntries([]),  // permission denied or network failure — clear loading state
     );
   } catch {
+    onEntries([]);
     return () => undefined;
   }
 }

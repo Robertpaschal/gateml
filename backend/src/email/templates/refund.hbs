@@ -1,0 +1,17 @@
+<h1>Refund processed</h1>
+<p>Hi {{name}},</p>
+<p>We've issued a refund to your payment method on file. Please allow 5–10 business days for it to appear on your statement.</p>
+
+<div class="highlight">
+  <p style="margin:0 0 4px;font-size:13px;color:#a1a1aa;">Refund amount</p>
+  <p style="margin:0;font-size:20px;font-weight:700;color:#e5e5e5;">{{amount}}</p>
+  {{#if reason}}
+  <p style="margin:8px 0 0;font-size:13px;color:#a1a1aa;">Reason: {{reason}}</p>
+  {{/if}}
+</div>
+
+<p>If you have any questions about this refund, reply to this email and we'll help you right away.</p>
+
+<p style="text-align:center;margin:24px 0;">
+  <a class="btn" href="{{billingUrl}}">View Billing</a>
+</p>

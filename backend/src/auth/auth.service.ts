@@ -40,11 +40,12 @@ export class AuthService {
     const provider = decoded.firebase?.sign_in_provider?.replace('.com', '') ?? 'email';
 
     const user = await this.users.upsert({
-      firebaseUid: decoded.uid,
-      email:       decoded.email ?? `${decoded.uid}@unknown.gateml`,
-      name:        decoded.name ?? null,
-      avatarUrl:   decoded.picture ?? null,
+      firebaseUid:    decoded.uid,
+      email:          decoded.email ?? `${decoded.uid}@unknown.gateml`,
+      name:           decoded.name ?? null,
+      avatarUrl:      decoded.picture ?? null,
       provider,
+      emailVerified:  decoded.email_verified ?? (provider !== 'email'),
     });
 
     const token = this.jwt.sign({ sub: user.id, email: user.email });

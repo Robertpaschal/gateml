@@ -263,10 +263,16 @@ export function BillingPage() {
             display: "flex", alignItems: "center", justifyContent: "space-between",
           }}>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Pay-as-you-go</div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Pay-as-you-go (BYOK overage)</div>
               <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                Continue beyond your quota at {fmtRate(myPaygRate)}
+                Allow BYOK calls beyond quota at {fmtRate(myPaygRate)} routing fee.
+                {" "}<span style={{ color: "var(--muted2)" }}>Provider token costs are always billed by your provider separately.</span>
               </div>
+              {data.useManaged && (
+                <div style={{ fontSize: 10, color: "var(--muted2)", marginTop: 3 }}>
+                  Managed Key calls follow their own token budget — this toggle does not affect them.
+                </div>
+              )}
             </div>
             <Toggle enabled={data.payAsYouGo} onChange={togglePayg} />
           </div>
@@ -307,36 +313,47 @@ export function BillingPage() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginTop: 14 }}>
             <div style={{ padding: "10px 12px", background: "var(--surface2)", borderRadius: 6 }}>
               <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Tokens used</div>
-              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-ui)", color: "var(--accent2)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--font-ui)", color: "var(--accent2)" }}>
                 {fmtTokens(data.managedUsage?.tokensUsed ?? 0)}
               </div>
-              <div style={{ fontSize: 9, color: "var(--muted2)" }}>this month</div>
+              <div style={{ fontSize: 9, color: "var(--muted2)" }}>
+                of {data.limits.managedTokensPerMonth === -1 ? "∞" : fmtTokens(data.limits.managedTokensPerMonth)} / mo
+              </div>
             </div>
             <div style={{ padding: "10px 12px", background: "var(--surface2)", borderRadius: 6 }}>
               <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Accrued cost</div>
-              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-ui)", color: "var(--text)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--font-ui)", color: "var(--text)" }}>
                 ${(data.managedUsage?.costUsd ?? 0).toFixed(4)}
               </div>
-              <div style={{ fontSize: 9, color: "var(--muted2)" }}>this month</div>
+              <div style={{ fontSize: 9, color: "var(--muted2)" }}>provider cost + {markup}%</div>
             </div>
             <div style={{ padding: "10px 12px", background: "var(--surface2)", borderRadius: 6 }}>
-              <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Status</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: data.useManaged ? "var(--accent2)" : "var(--muted)" }}>
-                {data.useManaged ? "Enabled" : "Disabled"}
+              <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Model access</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--accent2)" }}>
+                {data.limits.managedModelTier}
               </div>
               <div style={{ fontSize: 9, color: "var(--muted2)" }}>
-                <Link href="/dashboard/gateway" style={{ color: "var(--accent2)", textDecoration: "none" }}>
-                  {data.useManaged ? "Manage in Gateway" : "Enable in Gateway"}
-                </Link>
+                {data.limits.managedModelTier === "STANDARD" && "haiku · mini · flash"}
+                {data.limits.managedModelTier === "PREMIUM"  && "+ gpt-4o · sonnet · pro"}
+                {data.limits.managedModelTier === "ALL"      && "+ opus · gpt-4-turbo · o1"}
               </div>
+            </div>
+            <div style={{ padding: "10px 12px", background: "var(--surface2)", borderRadius: 6 }}>
+              <div style={{ fontSize: 10, color: "var(--muted2)", marginBottom: 4 }}>Daily limit</div>
+              <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--font-ui)", color: "var(--text)" }}>
+                {data.limits.managedRequestsPerDay === -1 ? "∞" : data.limits.managedRequestsPerDay.toLocaleString()}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--muted2)" }}>managed req / day</div>
             </div>
           </div>
 
           <div style={{ marginTop: 12, fontSize: 10, color: "var(--muted2)", lineHeight: 1.6 }}>
-            Managed key usage is billed separately from your plan quota. BYOK keys always take priority — managed keys are used only when no provider key is configured for that provider.
+            Managed key usage is billed separately from your request quota at provider cost + {markup}% markup.
+            BYOK keys always take priority and bypass all model-tier restrictions.
+            Upgrade your plan to access higher-tier models via managed keys.
           </div>
         </div>
       )}
@@ -491,18 +508,22 @@ export function BillingPage() {
             </tr>
           </thead>
           <tbody>
-            {[
-              ["Live requests / month",  "1,000",               "30,000"],
-              ["Test requests",          "Unlimited",           "Unlimited"],
-              ["GateML Managed Keys",    "✓",                   "✓"],
-              ["API key pairs",          "1",                   "5"],
-              ["Log retention",          "7 days",              "90 days"],
-              ["Prompts",                "1",                   "Unlimited"],
-              ["Prompt versioning",      "✗",                   "✓"],
-              ["Fallback chain",         "✗",                   "✓"],
-              ["Eval testing",           "✗",                   "✓"],
-              ["Pay-as-you-go",          fmtRate(freeRate),     fmtRate(proRate)],
-            ].map(([label, free, pro]) => (
+            {([
+              ["Live requests / month",           "1,000",            "30,000"],
+              ["Burst limit",                     "5 / min",          "60 / min"],
+              ["Test requests",                   "Unlimited",        "Unlimited"],
+              ["BYOK (your own provider keys)",   "✓ all models",     "✓ all models"],
+              ["Managed Keys — model tier",       "STANDARD",         "PREMIUM"],
+              ["Managed token budget / month",    "100K",             "5M"],
+              ["Managed requests / day",          "50",               "2,000"],
+              ["API key pairs",                   "1",                "5"],
+              ["Log retention",                   "7 days",           "90 days"],
+              ["Prompts",                         "1",                "Unlimited"],
+              ["Prompt versioning",               "✗",                "✓"],
+              ["Fallback chain",                  "✗",                "✓"],
+              ["Eval testing",                    "✗",                "✓"],
+              ["BYOK overage routing fee",        fmtRate(freeRate),  fmtRate(proRate)],
+            ] as [string, string, string][]).map(([label, free, pro]) => (
               <tr key={label}>
                 <td>{label}</td>
                 <td>{planCell(free, "free")}</td>
@@ -511,6 +532,10 @@ export function BillingPage() {
             ))}
           </tbody>
         </table>
+        <div style={{ marginTop: 10, fontSize: 10, color: "var(--muted2)", lineHeight: 1.6 }}>
+          BYOK = Bring Your Own Key. No model restrictions — you pay your provider directly. GateML charges a routing fee only for overage requests when PAYG is enabled.
+          Managed Keys = GateML's keys. Billed per-token (provider cost + {markup}% markup). Model tier and daily/monthly limits apply.
+        </div>
       </div>
     </div>
   );

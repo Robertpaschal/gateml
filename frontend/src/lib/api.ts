@@ -43,15 +43,19 @@ export const authApi = {
 // ── Billing ───────────────────────────────────────────────────────────────────
 
 export interface BillingLimits {
-  liveRequestsPerMonth: number;
-  maxApiKeyPairs: number;
-  logRetentionDays: number;
-  maxLogsPerQuery: number;
-  maxPrompts: number;
-  promptVersioning: boolean;
-  fallbackChain: boolean;
-  evalTesting: boolean;
-  paygRateUsd: number;
+  liveRequestsPerMonth:   number;
+  managedTokensPerMonth:  number;
+  managedRequestsPerDay:  number;
+  burstRequestsPerMinute: number;
+  managedModelTier:       "STANDARD" | "PREMIUM" | "ALL";
+  maxApiKeyPairs:         number;
+  logRetentionDays:       number;
+  maxLogsPerQuery:        number;
+  maxPrompts:             number;
+  promptVersioning:       boolean;
+  fallbackChain:          boolean;
+  evalTesting:            boolean;
+  paygRateUsd:            number;
 }
 
 export interface BillingProduct {

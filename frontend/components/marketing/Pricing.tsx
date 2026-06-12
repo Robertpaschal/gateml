@@ -5,32 +5,36 @@ import { billingApi, type BillingProduct, type BillingPublicConfig } from "../..
 
 const FREE_FEATURES = [
   "1,000 live requests / month",
+  "5 requests / minute (burst)",
   "Unlimited test mode requests",
-  "GateML Managed Keys (no setup)",
+  "BYOK — bring any OpenAI / Anthropic / Google key",
+  "Managed Keys: STANDARD models (Haiku, GPT-4o mini, Flash)",
+  "100K managed tokens / month · 50 managed req / day",
   "Basic observability dashboard",
-  "1 API key pair",
-  "7-day log retention (last 100)",
-  "Community support",
+  "1 API key pair · 7-day log retention",
+  "BYOK overage at $0.002 / req (routing fee only)",
 ];
 
 const PRO_FEATURES = [
   "30,000 live requests / month",
+  "60 requests / minute (burst)",
+  "BYOK — all providers, all models, unrestricted",
+  "Managed Keys: PREMIUM models (GPT-4o, Sonnet, Gemini Pro)",
+  "5M managed tokens / month · 2,000 managed req / day",
   "Full observability + cost tracking",
-  "GateML Managed Keys (no setup)",
   "Prompt library + version diffs",
-  "Eval testing suite",
-  "Fallback chain configuration",
-  "Up to 5 API key pairs",
-  "90-day log retention",
-  "Pay-as-you-go for overages",
+  "Eval testing suite · Fallback chain config",
+  "5 API key pairs · 90-day log retention",
+  "BYOK overage at $0.001 / req (routing fee only)",
   "Email support",
 ];
 
 const ENTERPRISE_FEATURES = [
-  "Unlimited requests",
-  "Custom rate limits",
+  "Unlimited requests · 500 req / min burst",
+  "Managed Keys: ALL models (Opus, GPT-4 Turbo, o1)",
+  "Unlimited managed tokens / month",
+  "Custom rate limits & SLA",
   "SSO / SAML",
-  "99.9% uptime SLA",
   "Dedicated Slack channel",
   "Custom contract & invoicing",
 ];
@@ -198,7 +202,7 @@ export function Pricing() {
   const markup     = cfg.managedMarkupPercent;
 
   function fmtRate(r: number) {
-    return `$${r < 0.01 ? r.toFixed(4) : r.toFixed(3)}/request`;
+    return `$${r < 0.01 ? r.toFixed(4) : r.toFixed(3)}/req`;
   }
 
   return (
@@ -301,33 +305,35 @@ export function Pricing() {
         <div style={{
           padding: "18px 24px",
           background: "rgba(0,201,255,0.04)", border: "1px solid rgba(0,201,255,0.15)",
-          borderRadius: 8, display: "flex", alignItems: "center", gap: 16,
+          borderRadius: 8, display: "flex", alignItems: "flex-start", gap: 16,
         }}>
           <span style={{
             fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: "var(--accent2)",
-            whiteSpace: "nowrap",
+            whiteSpace: "nowrap", paddingTop: 1,
           }}>Managed Keys</span>
-          <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
-            Don&apos;t want to manage provider API keys? Enable <strong style={{ color: "var(--text)" }}>GateML Managed Keys</strong> — GateML
-            routes through its own provider accounts and bills you per-token at provider cost + {markup}% markup.
-            Available on all plans, no credit card required to start.
+          <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.8 }}>
+            Skip provider key setup entirely. Enable <strong style={{ color: "var(--text)" }}>GateML Managed Keys</strong> and
+            GateML routes through its own accounts — billed per-token at provider cost + {markup}% markup.
+            Model access scales with your plan: STANDARD models on Starter, PREMIUM on Pro, all models on Enterprise.
+            Monthly token budgets apply. <strong style={{ color: "var(--text)" }}>BYOK always bypasses tier limits</strong> — your own keys work with any model on any plan.
           </span>
         </div>
 
         <div style={{
           padding: "18px 24px",
           background: "rgba(0,255,136,0.03)", border: "1px solid rgba(0,255,136,0.12)",
-          borderRadius: 8, display: "flex", alignItems: "center", gap: 16,
+          borderRadius: 8, display: "flex", alignItems: "flex-start", gap: 16,
         }}>
           <span style={{
             fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: "var(--accent)",
-            whiteSpace: "nowrap",
+            whiteSpace: "nowrap", paddingTop: 1,
           }}>Pay-as-you-go</span>
-          <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
-            Hit your monthly limit? Enable pay-as-you-go and keep going at{" "}
+          <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.8 }}>
+            Exhausted your monthly request quota on BYOK calls? Enable pay-as-you-go and keep routing at{" "}
             <strong style={{ color: "var(--text)" }}>{fmtRate(freeRate)}</strong> (Starter) or{" "}
-            <strong style={{ color: "var(--text)" }}>{fmtRate(proRate)}</strong> (Pro) — billed monthly,
-            no upfront commitment.
+            <strong style={{ color: "var(--text)" }}>{fmtRate(proRate)}</strong> (Pro).
+            This is a <strong style={{ color: "var(--text)" }}>platform routing fee only</strong> — you continue to pay your provider directly for tokens as normal.
+            Managed Key calls are never subject to this fee; they follow their own per-token billing.
           </span>
         </div>
       </div>

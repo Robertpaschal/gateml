@@ -13,6 +13,7 @@ interface WriteLogDto {
   costUsd:          number;
   path:             string;
   isTestMode:       boolean;
+  cached?:          boolean;
 }
 
 @Injectable()

@@ -231,26 +231,49 @@ export class BillingService implements OnModuleInit {
     return { requests: record?.requests ?? 0, month };
   }
 
-  async checkQuota(userId: string): Promise<{ useManaged: boolean; isPaygOverage: boolean }> {
+  async checkQuota(userId: string): Promise<{ useManaged: boolean; isPaygOverage: boolean; plan: Plan; managedTokensUsedThisMonth: number }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
 
-    const lim = this.limits(user.plan).liveRequestsPerMonth;
-    if (lim === -1) return { useManaged: user.useManaged, isPaygOverage: false }; // unlimited
+    const planLimits = this.limits(user.plan);
+    const month      = currentMonth();
+    const record     = await this.prisma.usageRecord.findUnique({ where: { userId_month: { userId, month } } });
+    const requests   = record?.requests ?? 0;
+    const managedTokensUsedThisMonth = record?.tokensUsed ?? 0;
 
-    const { requests } = await this.getUsage(userId);
+    // ── Monthly managed token budget ─────────────────────────────────────────
+    if (user.useManaged && planLimits.managedTokensPerMonth !== -1) {
+      if (managedTokensUsedThisMonth >= planLimits.managedTokensPerMonth) {
+        throw new HttpException(
+          {
+            statusCode: 402,
+            error:      'managed_token_quota_exceeded',
+            message:    `Monthly managed-key token limit of ${planLimits.managedTokensPerMonth.toLocaleString()} reached. Upgrade your plan or add your own API keys.`,
+            upgradeUrl: '/dashboard/billing',
+            plan:       user.plan,
+            used:       managedTokensUsedThisMonth,
+            limit:      planLimits.managedTokensPerMonth,
+          },
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
+    }
+
+    // ── Monthly request quota ─────────────────────────────────────────────────
+    const lim = planLimits.liveRequestsPerMonth;
+    if (lim === -1) return { useManaged: user.useManaged, isPaygOverage: false, plan: user.plan, managedTokensUsedThisMonth };
 
     if (requests === Math.floor(lim * 0.8)) {
-      this.email.sendQuotaWarning(user.email, user.name, requests, lim, user.plan);
+      void this.email.sendQuotaWarning(user.email, user.name, requests, lim, user.plan);
     }
 
-    if (requests < lim) return { useManaged: user.useManaged, isPaygOverage: false };
+    if (requests < lim) return { useManaged: user.useManaged, isPaygOverage: false, plan: user.plan, managedTokensUsedThisMonth };
 
     if (requests === lim) {
-      this.email.sendQuotaExceeded(user.email, user.name, lim, user.plan);
+      void this.email.sendQuotaExceeded(user.email, user.name, lim, user.plan);
     }
 
-    if (user.payAsYouGo) return { useManaged: user.useManaged, isPaygOverage: true };
+    if (user.payAsYouGo) return { useManaged: user.useManaged, isPaygOverage: true, plan: user.plan, managedTokensUsedThisMonth };
 
     throw new HttpException(
       {
@@ -266,22 +289,26 @@ export class BillingService implements OnModuleInit {
     );
   }
 
-  async incrementUsage(userId: string, isPaygOverage = false): Promise<void> {
+  async incrementUsage(userId: string): Promise<void> {
     const month = currentMonth();
     await this.prisma.usageRecord.upsert({
       where:  { userId_month: { userId, month } },
-      update: {
-        requests:      { increment: 1 },
-        ...(isPaygOverage ? { paygRequests: { increment: 1 } } : {}),
-        updatedAt:     new Date(),
-      },
-      create: {
-        userId,
-        month,
-        requests:     1,
-        paygRequests: isPaygOverage ? 1 : 0,
-        updatedAt:    new Date(),
-      },
+      update: { requests: { increment: 1 }, updatedAt: new Date() },
+      create: { userId, month, requests: 1, updatedAt: new Date() },
+    });
+  }
+
+  /**
+   * Called only for BYOK calls that land in PAYG overage.
+   * Managed-key calls are intentionally excluded — they are already billed
+   * per-token via incrementManagedUsage and must not generate a second flat charge.
+   */
+  async markPaygRequest(userId: string): Promise<void> {
+    const month = currentMonth();
+    await this.prisma.usageRecord.upsert({
+      where:  { userId_month: { userId, month } },
+      update: { paygRequests: { increment: 1 }, updatedAt: new Date() },
+      create: { userId, month, requests: 0, paygRequests: 1, updatedAt: new Date() },
     });
   }
 
@@ -700,7 +727,7 @@ export class BillingService implements OnModuleInit {
           subscription: subId,
           amount:       Math.round(amountUsd * 100),
           currency:     'usd',
-          description:  `Pay-as-you-go overage: ${unbilledPayg} requests @ $${paygRate}/req`,
+          description:  `BYOK overage routing fee: ${unbilledPayg.toLocaleString()} requests × $${paygRate}/req (platform infrastructure — provider costs billed separately by your provider)`,
         });
         await this.prisma.usageRecord.update({
           where: { userId_month: { userId: user.id, month } },

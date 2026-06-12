@@ -380,6 +380,7 @@ model RequestLog {
   costUsd          Float    @default(0)
   path             String
   isTestMode       Boolean  @default(false)
+  cached           Boolean  @default(false)
   createdAt        DateTime @default(now())
 
   apiKey ApiKey @relation(fields: [apiKeyId], references: [id])

@@ -6,6 +6,9 @@ COPY package.json ./
 RUN npm install
 
 COPY . .
+# Server-side rewrite destination — baked into routes-manifest.json at build time
+ARG BACKEND_URL=http://localhost:3001
+ENV BACKEND_URL=$BACKEND_URL
 RUN npm run build
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────

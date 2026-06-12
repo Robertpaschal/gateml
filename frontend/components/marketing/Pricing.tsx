@@ -192,7 +192,7 @@ export function Pricing() {
   const annual_ = products.find(p => p.planType === "PRO" && p.interval === "year");
 
   const monthlyPrice   = (monthly?.amountCents ?? 1900)  / 100;
-  const annualTotal    = (annual_?.amountCents  ?? 15200) / 100;
+  const annualTotal    = (annual_?.amountCents  ?? 15600) / 100;
   const annualPerMonth = (annualTotal / 12).toFixed(2);
   const savings        = monthlyPrice > 0 ? Math.round((1 - (annualTotal / 12) / monthlyPrice) * 100) : 33;
   const trialDays      = (annual ? annual_ : monthly)?.trialDays ?? cfg.trialDays;

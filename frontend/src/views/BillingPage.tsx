@@ -123,7 +123,7 @@ export function BillingPage() {
       const annual  = process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_ANNUAL;
       const fb: BillingProduct[] = [];
       if (monthly) fb.push({ id: "monthly", name: "GateML Pro",        description: null, stripePriceId: monthly, planType: "PRO", interval: "month", amountCents: 1900,  currency: "usd", isPublic: true, trialDays: 7 });
-      if (annual)  fb.push({ id: "annual",  name: "GateML Pro Annual", description: null, stripePriceId: annual,  planType: "PRO", interval: "year",  amountCents: 15200, currency: "usd", isPublic: true, trialDays: 7 });
+      if (annual)  fb.push({ id: "annual",  name: "GateML Pro Annual", description: null, stripePriceId: annual,  planType: "PRO", interval: "year",  amountCents: 15600, currency: "usd", isPublic: true, trialDays: 7 });
       setProducts(fb);
     });
   }, []);
@@ -177,7 +177,7 @@ export function BillingPage() {
   const annualProduct   = products.find(p => p.planType === "PRO" && p.interval === "year");
   const selectedProduct = annual ? annualProduct : monthlyProduct;
   const monthlyPrice    = (monthlyProduct?.amountCents ?? 1900)  / 100;
-  const annualPrice     = (annualProduct?.amountCents  ?? 15200) / 100;
+  const annualPrice     = (annualProduct?.amountCents  ?? 15600) / 100;
   const annualPerMonth  = (annualPrice / 12).toFixed(2);
   const savings         = monthlyPrice > 0 ? Math.round((1 - (annualPrice / 12) / monthlyPrice) * 100) : 33;
   const trialDays       = selectedProduct?.trialDays ?? 7;
